@@ -1,0 +1,462 @@
+const { app } = require('electron');
+const fs   = require('fs');
+const path = require('path');
+const { globalShortcut } = require('electron');
+
+// Create ~/Library/Logs/Groq Desktop if it does not exist
+app.setAppLogsPath();
+const logFile = path.join(app.getPath('logs'), 'main.log');
+const logStream = fs.createWriteStream(logFile, { flags: 'a' });
+
+// Mirror every console.* call to the file
+['log', 'info', 'warn', 'error'].forEach(fn => {
+  const orig = console[fn].bind(console);
+  console[fn] = (...args) => {
+    orig(...args);
+    logStream.write(args.map(String).join(' ') + '\n');
+  };
+});
+
+console.log('Groq Desktop started, logging to', logFile);
+
+// Import necessary Electron modules
+const { BrowserWindow, ipcMain, screen, shell } = require('electron');
+
+// Import shared models
+const { MODEL_CONTEXT_SIZES, getModelContextSizes, getModelsFromAPIWithCache } = require('../shared/models.js');
+
+// Import handlers
+const chatHandler = require('./chatHandler');
+const toolHandler = require('./toolHandler');
+
+// Import new manager modules
+const { initializeSettingsHandlers, loadSettings, saveSettings } = require('./settingsManager');
+const { initializeCommandResolver, resolveCommandPath } = require('./commandResolver');
+const mcpManager = require('./mcpManager');
+const { initializeWindowManager } = require('./windowManager');
+const authManager = require('./authManager');
+const googleOAuthManager = require('./googleOAuthManager');
+
+// Import context capture system
+const ContextCapture = require('./contextCapture');
+const PopupWindowManager = require('./popupWindow');
+
+// Import chat history manager
+const chatHistoryManager = require('./chatHistoryManager');
+
+// Import speech-to-text handler
+const speechToTextHandler = require('./speechToTextHandler');
+
+// Global variable to hold the main window instance
+let mainWindow;
+
+// Variable to hold loaded model context sizes
+let modelContextSizes = {};
+
+// --- Context Sharing State ---
+let pendingContext = null; // Holds context to be passed to renderer
+let contextCapture = null; // Context capture instance
+let lastCapturedContext = null; // Store the most recent captured context
+let popupWindowManager = null; // Popup window manager instance
+
+function handleUrlProtocol(url) {
+  // Handle groq://context?text=...&title=... URLs
+  if (!url.startsWith('groq://')) return null;
+  
+  try {
+    const urlObj = new URL(url);
+    if (urlObj.pathname === '/context') {
+      const context = {};
+      
+      if (urlObj.searchParams.has('text')) {
+        context.text = decodeURIComponent(urlObj.searchParams.get('text'));
+      }
+      if (urlObj.searchParams.has('title')) {
+        context.title = decodeURIComponent(urlObj.searchParams.get('title'));
+      }
+      if (urlObj.searchParams.has('source')) {
+        context.source = decodeURIComponent(urlObj.searchParams.get('source'));
+      }
+      
+      return Object.keys(context).length > 0 ? context : null;
+    }
+  } catch (error) {
+    console.error('Error parsing URL protocol:', error);
+  }
+  
+  return null;
+}
+
+function setContextForRenderer(context) {
+  pendingContext = context;
+  
+  // If main window is already created, send the context immediately
+  if (mainWindow && mainWindow.webContents) {
+    mainWindow.webContents.send('external-context', context);
+  }
+}
+
+// --- Context Capture Functions ---
+function initializeContextCapture() {
+  contextCapture = new ContextCapture();
+  popupWindowManager = new PopupWindowManager();
+  
+  // Register global hotkey with callback that opens popup
+  const success = contextCapture.registerGlobalHotkey((capturedContext) => {
+    console.log('Context captured via global hotkey:', capturedContext);
+    lastCapturedContext = capturedContext;
+    
+    // Check if popup is enabled in settings
+    const settings = loadSettings();
+    if (settings.popupEnabled === false) {
+      console.log('Popup is disabled in settings. Not showing.');
+      // Optionally, show the main window instead
+      if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.focus();
+        // If you want to pass context to the main window, you can do it here
+        if (mainWindow.webContents) {
+            mainWindow.webContents.send('context-captured', capturedContext);
+        }
+      }
+      return;
+    }
+
+    // Open popup window with captured context
+    try {
+      const { x, y } = screen.getCursorScreenPoint();
+      popupWindowManager.createPopupWindow(capturedContext, { x, y });
+      console.log('Popup window opened with context from:', capturedContext.source);
+    } catch (error) {
+      console.error('Error opening popup window:', error);
+    }
+    
+    // Also notify main window if it exists (for legacy support)
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+      mainWindow.webContents.send('context-captured', capturedContext);
+    }
+  });
+  
+  if (!success) {
+    console.error('Failed to register global hotkey for context capture');
+  }
+  
+  return success;
+}
+
+function cleanupContextCapture() {
+  if (contextCapture) {
+    contextCapture.unregisterGlobalHotkey();
+    contextCapture = null;
+  }
+  
+  if (popupWindowManager) {
+    popupWindowManager.closePopup();
+    popupWindowManager = null;
+  }
+}
+
+// Register URL protocol handler
+if (process.defaultApp) {
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient('groq', process.execPath, [path.resolve(process.argv[1])]);
+  }
+} else {
+  app.setAsDefaultProtocolClient('groq');
+}
+
+// Handle protocol on Windows/Linux
+app.on('second-instance', (event, commandLine) => {
+  // Someone tried to run a second instance, focus our window instead
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+  
+  // Check if there's a protocol URL in the command line
+  const protocolUrl = commandLine.find(arg => arg.startsWith('groq://'));
+  if (protocolUrl) {
+    const context = handleUrlProtocol(protocolUrl);
+    if (context) {
+      console.log('Received context from protocol URL:', context);
+      setContextForRenderer(context);
+    }
+  }
+});
+
+// Handle protocol on macOS
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  const context = handleUrlProtocol(url);
+  if (context) {
+    console.log('Received context from protocol URL:', context);
+    setContextForRenderer(context);
+  }
+});
+
+// App initialization sequence
+app.whenReady().then(async () => {
+  console.log("App Ready. Initializing...");
+
+  // Initialize command resolver first (might be needed by others)
+  initializeCommandResolver(app);
+
+  // Load model context sizes from the API
+  try {
+    const currentSettings = loadSettings();
+    if (currentSettings.GROQ_API_KEY && currentSettings.GROQ_API_KEY !== "<replace me>") {
+      console.log('Fetching models from Groq API...');
+      modelContextSizes = await getModelsFromAPIWithCache(currentSettings.GROQ_API_KEY);
+      console.log('Successfully loaded models from API.');
+    } else {
+      console.warn('No valid API key found, using default model configuration.');
+      modelContextSizes = MODEL_CONTEXT_SIZES;
+    }
+  } catch (error) {
+    console.error('Failed to load models from API:', error);
+    modelContextSizes = MODEL_CONTEXT_SIZES; // Fallback
+  }
+
+  // --- Early IPC Handlers required by popup and renderer before other init --- //
+  ipcMain.handle('get-model-configs', async () => {
+    // Return a copy to prevent accidental modification with custom models merged in
+    const currentSettings = loadSettings();
+    
+    // Try to fetch fresh models if API key is available
+    let apiModels = modelContextSizes;
+    if (currentSettings.GROQ_API_KEY && currentSettings.GROQ_API_KEY !== "<replace me>") {
+      try {
+        apiModels = await getModelsFromAPIWithCache(currentSettings.GROQ_API_KEY);
+      } catch (error) {
+        console.error('Error fetching models in get-model-configs:', error);
+        // Fall back to cached modelContextSizes
+      }
+    }
+    
+    const mergedModelContextSizes = getModelContextSizes(currentSettings.customModels || {}, apiModels);
+    return JSON.parse(JSON.stringify(mergedModelContextSizes));
+  });
+
+  ipcMain.handle('get-captured-context', async () => {
+    // Return the most recently captured context
+    const context = lastCapturedContext;
+    // Don't clear automatically for popup usage
+    return context;
+  });
+
+  ipcMain.handle('resize-popup', (event, { width, height, resizable }) => {
+    if (popupWindowManager) {
+      popupWindowManager.resizePopup(width, height, resizable);
+    }
+  });
+
+  // Initialize window manager and get the main window instance
+  mainWindow = initializeWindowManager(app, screen, shell, BrowserWindow);
+  if (!mainWindow) {
+      console.error("Fatal: Main window could not be created. Exiting.");
+      app.quit();
+      return;
+  }
+
+  // When the main window is closed, deregister its reference
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+
+  // Send pending context to renderer if available
+  if (pendingContext) {
+    mainWindow.webContents.once('did-finish-load', () => {
+      mainWindow.webContents.send('external-context', pendingContext);
+    });
+  }
+
+  // Initialize context capture system
+  const contextCaptureSuccess = initializeContextCapture();
+  if (contextCaptureSuccess) {
+    console.log('Context capture system initialized successfully');
+    console.log('Press Cmd+G (Mac) or Ctrl+G (Windows/Linux) from any app to open popup with context');
+  } else {
+    console.warn('Context capture system failed to initialize');
+  }
+
+  // Initialize settings handlers (needs app)
+  initializeSettingsHandlers(ipcMain, app);
+
+  // Initialize chat history manager
+  chatHistoryManager.initialize(app, loadSettings);
+  chatHistoryManager.initializeChatHistoryHandlers(ipcMain);
+  console.log("[Main Init] Chat history manager initialized");
+
+  // Initialize speech-to-text handler
+  speechToTextHandler.initializeSpeechToTextHandlers(ipcMain, loadSettings);
+  console.log("[Main Init] Speech-to-text handler initialized");
+
+  // Initialize MCP handlers (use module object)
+  mcpManager.initializeMcpHandlers(ipcMain, app, mainWindow, loadSettings, resolveCommandPath);
+
+  // Initialize Auth Manager (check will now work)
+  console.log("[Main Init] Initializing Auth Manager...");
+  if (mcpManager && typeof mcpManager.retryConnectionAfterAuth === 'function') {
+      authManager.initialize(mcpManager.retryConnectionAfterAuth);
+  } else {
+       console.error("[Main] CRITICAL: mcpManager or retryConnectionAfterAuth not available for AuthManager initialization!");
+  }
+
+  // Initialize Google OAuth Manager
+  console.log("[Main Init] Initializing Google OAuth Manager...");
+  googleOAuthManager.initialize(app, saveSettings);
+
+  // --- Google OAuth IPC Handlers --- //
+  ipcMain.handle('google-oauth-refresh', async () => {
+    console.log('[Main] Manual Google OAuth token refresh requested');
+    return googleOAuthManager.manualRefresh();
+  });
+
+  ipcMain.handle('google-oauth-status', async () => {
+    const currentSettings = loadSettings();
+    return googleOAuthManager.getTokenStatus(currentSettings);
+  });
+
+  ipcMain.handle('google-oauth-validate', async () => {
+    const currentSettings = loadSettings();
+    return googleOAuthManager.validateCredentials(currentSettings);
+  });
+
+  // --- Register Core App IPC Handlers --- //
+  // Chat completion (use module object)
+  ipcMain.on('chat-stream', async (event, messages, model) => {
+    const currentSettings = loadSettings();
+    const { discoveredTools } = mcpManager.getMcpState(); // Use module object
+    
+    // Try to get fresh models from API
+    let apiModels = modelContextSizes;
+    if (currentSettings.GROQ_API_KEY && currentSettings.GROQ_API_KEY !== "<replace me>") {
+      try {
+        apiModels = await getModelsFromAPIWithCache(currentSettings.GROQ_API_KEY);
+      } catch (error) {
+        console.error('Error fetching models in chat-stream:', error);
+        // Fall back to cached modelContextSizes
+      }
+    }
+    
+    // Merge API models with custom models from settings
+    const mergedModelContextSizes = getModelContextSizes(currentSettings.customModels || {}, apiModels);
+    
+    chatHandler.handleChatStream(event, messages, model, currentSettings, mergedModelContextSizes, discoveredTools);
+  });
+
+  // Stop chat stream
+  ipcMain.on('stop-chat-stream', async (event) => {
+    console.log('[Main] Received stop-chat-stream request');
+    chatHandler.stopChatStream(); // Stop all active streams
+  });
+
+  // NOTE: MCP approval response handler removed - Groq does not yet support mcp_approval_response
+
+  // Tool execution (use module object)
+  console.log("[Main Init] Registering execute-tool-call...");
+  ipcMain.handle('execute-tool-call', async (event, toolCall) => {
+    const currentSettings = loadSettings();
+    const { discoveredTools, mcpClients } = mcpManager.getMcpState(); // Use module object
+    return toolHandler.handleExecuteToolCall(event, toolCall, discoveredTools, mcpClients, currentSettings);
+  });
+  console.log("[Main Init] execute-tool-call registered successfully");
+
+  // Model configs handler already registered above during early initialization
+  console.log("[Main Init] Continuing with remaining handlers...");
+
+  // --- Context Sharing IPC Handlers (Legacy - for URL/CLI context) ---
+  console.log("[Main Init] Registering context handlers...");
+  ipcMain.handle('get-pending-context', async () => {
+    const context = pendingContext;
+    pendingContext = null; // Clear after retrieval
+    return context;
+  });
+  console.log("[Main Init] get-pending-context registered");
+
+  ipcMain.handle('clear-context', async () => {
+    pendingContext = null;
+  });
+
+  // --- Context Capture IPC Handlers (for modal and popup) ---
+  // Note: get-captured-context handler is registered earlier in the initialization
+
+  ipcMain.handle('clear-captured-context', async () => {
+    lastCapturedContext = null;
+  });
+
+  ipcMain.handle('trigger-context-capture', async () => {
+    // Manually trigger context capture (useful for testing)
+    if (contextCapture) {
+      return await contextCapture.captureContext();
+    }
+    return null;
+  });
+
+  ipcMain.handle('capture-manual-context', async (event, text, title, source) => {
+    // Allow manual context input
+    if (contextCapture) {
+      return await contextCapture.captureManualContext(text, title, source);
+    }
+    return null;
+  });
+
+  // --- Popup Window IPC Handlers ---
+  ipcMain.handle('close-popup', async () => {
+    if (popupWindowManager) {
+      popupWindowManager.closePopup();
+    }
+  });
+
+  ipcMain.handle('is-popup-open', async () => {
+    return popupWindowManager ? popupWindowManager.isOpen() : false;
+  });
+
+  // resize-popup handler already registered above during early initialization
+
+  // --- Auth IPC Handler ---
+  console.log("[Main Init] Registering auth handler...");
+  ipcMain.handle('start-mcp-auth-flow', async (event, { serverId, serverUrl }) => {
+      if (!serverId || !serverUrl) {
+          throw new Error("Missing serverId or serverUrl for start-mcp-auth-flow");
+      }
+      try {
+          console.log(`[Main] Handling start-mcp-auth-flow for ${serverId}`);
+          const result = await authManager.initiateAuthFlow(serverId, serverUrl);
+          return result;
+      } catch (error) {
+          console.error(`[Main] Error handling start-mcp-auth-flow for ${serverId}:`, error);
+          throw error;
+      }
+  });
+
+  // --- Post-initialization Tasks --- //
+  console.log("Setting up MCP auto-connection timeout...");
+  setTimeout(() => {
+      console.log("Triggering MCP auto-connection...");
+      mcpManager.connectConfiguredMcpServers(); // Use module object
+  }, 1000);
+
+  console.log("Initialization complete.");
+});
+
+// Make sure we handle single instance properly
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  // Continue with app initialization
+}
+
+// Clean up context capture on app quit
+app.on('before-quit', () => {
+  cleanupContextCapture();
+});
+
+// Note: App lifecycle events (window-all-closed, activate) are now handled by windowManager.js
+
+// Keep any essential top-level error handling or logging if needed
+process.on('uncaughtException', (error) => {
+    console.error('Unhandled Exception:', error);
+    // Optionally: Log to file, show dialog, etc.
+});

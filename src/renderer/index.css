@@ -1,0 +1,325 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 60 13% 94%;
+    --foreground: 224 71.4% 4.1%;
+    --card: 0 0% 100%;
+    --card-foreground: 224 71.4% 4.1%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 71.4% 4.1%;
+    --primary: 9 90% 59%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 220 14.3% 95.9%;
+    --secondary-foreground: 220.9 39.3% 11%;
+    --muted: 220 14.3% 95.9%;
+    --muted-foreground: 220 8.9% 46.1%;
+    --accent: 220 14.3% 95.9%;
+    --accent-foreground: 220.9 39.3% 11%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 9 90% 59%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 224 71.4% 4.1%;
+    --foreground: 0 0% 95%;
+    --card: 224 71.4% 4.1%;
+    --card-foreground: 0 0% 95%;
+    --popover: 224 71.4% 4.1%;
+    --popover-foreground: 0 0% 95%;
+    --primary: 9 90% 59%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 215 27.9% 16.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 215 27.9% 16.9%;
+    --muted-foreground: 217.9 10.6% 64.9%;
+    --accent: 215 27.9% 16.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 215 27.9% 16.9%;
+    --input: 215 27.9% 16.9%;
+    --ring: 9 90% 59%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-transparent text-foreground;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply px-4 py-2 rounded-md font-medium transition-colors;
+  }
+  
+  .btn-primary {
+    @apply bg-[#F55036] text-white hover:bg-[#F55036]/90;
+  }
+  
+  .input {
+    @apply px-4 py-2 border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring bg-background text-foreground;
+  }
+
+  /* Markdown styling */
+  .markdown-content {
+    @apply text-inherit;
+  }
+
+  .markdown-content p:not(:last-child) {
+    @apply mb-2;
+  }
+  
+  /* Override for reasoning content - no paragraph margins */
+  .reasoning-content .markdown-content p:not(:last-child) {
+    @apply mb-0;
+  }
+
+  .markdown-content h1 {
+    @apply text-2xl font-bold my-4;
+  }
+
+  .markdown-content h2 {
+    @apply text-xl font-bold my-3;
+  }
+  
+  .markdown-content h3 {
+    @apply text-lg font-bold my-2;
+  }
+
+  .markdown-content ul, .markdown-content ol {
+    @apply pl-6 my-2;
+  }
+
+  .markdown-content ul {
+    @apply list-disc;
+  }
+
+  .markdown-content ol {
+    @apply list-decimal;
+  }
+
+  .markdown-content code {
+    @apply bg-muted px-1 py-0.5 rounded;
+  }
+
+  .markdown-content pre {
+    @apply bg-muted p-3 rounded my-2 overflow-auto;
+  }
+
+  .markdown-content pre code {
+    @apply bg-transparent p-0;
+  }
+
+  .markdown-content blockquote {
+    @apply border-l-4 border-border pl-4 italic my-2;
+  }
+
+  .markdown-content table {
+    @apply border-collapse border border-border my-2;
+  }
+
+  .markdown-content th, .markdown-content td {
+    @apply border border-border px-2 py-1;
+  }
+}
+
+/* Apply link styles outside the layer for higher specificity */
+.markdown-content a {
+  @apply text-primary underline;
+}
+
+/* Add break-all for long links within markdown */
+.markdown-content a {
+  word-break: break-all;
+}
+
+/* Tools and status indicators */
+.tools-button {
+  @apply flex items-center justify-center text-muted-foreground bg-muted hover:text-foreground p-2 rounded-full transition-colors;
+}
+
+.status-indicator {
+  @apply flex items-center gap-2 text-sm text-muted-foreground bg-muted font-medium px-3 py-1 rounded-full;
+}
+
+.status-indicator.loading {
+  @apply text-primary font-medium;
+}
+
+.loading-spinner {
+  @apply w-4 h-4 border-2 border-primary/20 border-t-primary rounded-full animate-spin;
+}
+
+.refresh-button {
+  @apply bg-transparent border-none text-muted-foreground hover:text-primary cursor-pointer transition-colors p-1 rounded-full flex items-center justify-center w-6 h-6;
+}
+
+.refresh-button span {
+  @apply inline-block transition-transform;
+}
+
+/* Model selector styling */
+select#model-select {
+  @apply appearance-none bg-transparent text-muted-foreground text-sm border-none focus:ring-0 cursor-pointer hover:text-foreground transition-colors;
+}
+
+select#model-select option {
+  @apply bg-background text-foreground;
+}
+
+/* Message streaming animation */
+.streaming-indicator {
+  @apply flex items-center gap-1 mb-2;
+}
+
+.streaming-indicator .dot {
+  @apply w-1.5 h-1.5 rounded-full bg-muted-foreground opacity-60;
+}
+
+.streaming-indicator .dot-1 {
+  animation: pulse-dot 1.4s infinite ease-in-out;
+  animation-delay: 0s;
+}
+
+.streaming-indicator .dot-2 {
+  animation: pulse-dot 1.4s infinite ease-in-out;
+  animation-delay: 0.2s;
+}
+
+.streaming-indicator .dot-3 {
+  animation: pulse-dot 1.4s infinite ease-in-out;
+  animation-delay: 0.4s;
+}
+
+@keyframes pulse-dot {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.8);
+    opacity: 0.6;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% center;
+  }
+  100% {
+    background-position: -200% center;
+  }
+}
+
+/* Reasoning section styles */
+.reasoning-section {
+  @apply mt-2 text-sm;
+}
+
+.reasoning-toggle {
+  @apply text-xs text-muted-foreground bg-transparent border-none underline cursor-pointer px-1 py-0.5 mt-1 rounded transition-all duration-200 hover:text-primary hover:bg-primary/10;
+}
+
+.reasoning-content .markdown-content p {
+  margin-bottom: 0 !important;
+}
+
+.reasoning-content .markdown-content p:not(:last-child) {
+  margin-bottom: 0 !important;
+}
+
+/* Additional model selector styling for enhanced appearance */
+select#model-select {
+  @apply appearance-none bg-background border border-input shadow-sm text-foreground font-medium rounded-md text-sm px-3 py-2 pr-8 transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring hover:border-muted-foreground;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236B7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+  background-position: right 0.5rem center;
+  background-repeat: no-repeat;
+  background-size: 1.5em 1.5em;
+}
+
+/* Chat History Sidebar Styles */
+.chat-sidebar {
+  @apply flex flex-col h-full bg-background border-r border-border;
+  transition: width 0.3s ease-in-out;
+}
+
+.chat-sidebar.collapsed {
+  @apply w-16;
+}
+
+.chat-sidebar.expanded {
+  @apply w-64;
+}
+
+.chat-sidebar-header {
+  @apply flex items-center justify-between p-3 border-b border-border;
+}
+
+.chat-list-item {
+  @apply relative flex items-center gap-2 px-3 py-2 cursor-pointer rounded-lg mx-2 transition-colors duration-150;
+}
+
+.chat-list-item:hover {
+  @apply bg-muted/50;
+}
+
+.chat-list-item.active {
+  @apply bg-[#E9E9DF] text-foreground;
+}
+
+.chat-list-item .chat-title {
+  @apply truncate text-sm font-medium;
+}
+
+.chat-list-item .chat-time {
+  @apply flex items-center gap-1 text-xs text-muted-foreground;
+}
+
+/* Sidebar group headers */
+.chat-group-header {
+  @apply px-3 py-1 text-xs font-medium text-muted-foreground uppercase tracking-wider;
+}
+
+/* Sidebar scrollbar styling */
+.chat-sidebar .overflow-y-auto {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted)) transparent;
+}
+
+.chat-sidebar .overflow-y-auto::-webkit-scrollbar {
+  width: 6px;
+}
+
+.chat-sidebar .overflow-y-auto::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-sidebar .overflow-y-auto::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--muted));
+  border-radius: 3px;
+}
+
+.chat-sidebar .overflow-y-auto::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--muted-foreground));
+} 
