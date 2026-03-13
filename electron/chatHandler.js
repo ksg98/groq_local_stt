@@ -5,6 +5,7 @@ const path = require('path');
 const { pruneMessageHistory } = require('./messageUtils');
 const { supportsBuiltInTools } = require('../shared/models');
 const googleOAuthManager = require('./googleOAuthManager');
+const { routeToProvider } = require('./providers/providerRouter');
 
 // Track active streams to allow cancellation
 const activeStreams = new Map();
@@ -1479,7 +1480,7 @@ async function handleResponsesApiStream(event, messages, model, settings, modelC
 async function handleChatStream(event, messages, model, settings, modelContextSizes, discoveredTools) {
     // Get sender ID to track streams per webContents (prevents duplicate streams during HMR)
     const senderId = event.sender.id;
-    
+
     // Cancel any existing streams from this sender before starting a new one
     // This prevents duplicate responses when HMR reloads the renderer
     const existingStreamId = streamsBySender.get(senderId);
@@ -1491,7 +1492,14 @@ async function handleChatStream(event, messages, model, settings, modelContextSi
         }
         cleanupStream(existingStreamId);
     }
-    
+
+    // Route to non-Groq provider if applicable
+    const handled = routeToProvider(
+        event, messages, model, settings, modelContextSizes, discoveredTools,
+        { activeStreams, streamsBySender, cleanupStream }
+    );
+    if (handled) return;
+
     // Check if Responses API should be used
     if (settings.useResponsesApi) {
         return handleResponsesApiStream(event, messages, model, settings, modelContextSizes, discoveredTools);

@@ -13,9 +13,13 @@ import Switch from '../components/ui/Switch';
 function Settings() {
   const [settings, setSettings] = useState({
     GROQ_API_KEY: '',
+    ANTHROPIC_API_KEY: '',
+    OPENAI_API_KEY: '',
     temperature: 0.7,
     top_p: 0.95,
     reasoning_effort: 'medium',
+    anthropic_reasoning_level: 'medium',
+    openai_reasoning_effort: 'medium',
     mcpServers: {},
     disabledMcpServers: [],
     customSystemPrompt: '',
@@ -48,6 +52,8 @@ function Settings() {
   const [saveStatus, setSaveStatus] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
+  const [showAnthropicApiKey, setShowAnthropicApiKey] = useState(false);
+  const [showOpenaiApiKey, setShowOpenaiApiKey] = useState(false);
   const [newMcpServer, setNewMcpServer] = useState({
     id: '',
     transport: 'stdio',
@@ -117,6 +123,18 @@ function Settings() {
         if (!settingsData.reasoning_effort) {
             settingsData.reasoning_effort = 'medium';
         }
+        if (!settingsData.ANTHROPIC_API_KEY) {
+            settingsData.ANTHROPIC_API_KEY = '';
+        }
+        if (!settingsData.OPENAI_API_KEY) {
+            settingsData.OPENAI_API_KEY = '';
+        }
+        if (!settingsData.anthropic_reasoning_level) {
+            settingsData.anthropic_reasoning_level = 'medium';
+        }
+        if (!settingsData.openai_reasoning_effort) {
+            settingsData.openai_reasoning_effort = 'medium';
+        }
         if (settingsData.disableThinkingSummaries === undefined) {
             settingsData.disableThinkingSummaries = false;
         }
@@ -161,6 +179,8 @@ function Settings() {
         setSettings(prev => ({
             ...prev,
             GROQ_API_KEY: '',
+            ANTHROPIC_API_KEY: '',
+            OPENAI_API_KEY: '',
             temperature: 0.7,
             top_p: 0.95,
             mcpServers: {},
@@ -177,6 +197,8 @@ function Settings() {
                 browserSearch: false
             },
             reasoning_effort: 'medium',
+            anthropic_reasoning_level: 'medium',
+            openai_reasoning_effort: 'medium',
             modelFilter: '',
             modelFilterExclude: '',
             disableThinkingSummaries: false,
@@ -1233,6 +1255,134 @@ function Settings() {
                     For Groq-compatible endpoints: <code className="text-xs bg-muted px-1 py-0.5 rounded">https://api.groq.com/openai/v1/</code>.
                     For custom OpenAI-compatible endpoints: <code className="text-xs bg-muted px-1 py-0.5 rounded">http://your-server/v1/</code>.
                     {settings.customApiBaseUrlEnabled ? ' Toggle off to use the default Groq API.' : ' Toggle on to enable custom API base URL.'}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Claude (Anthropic) Configuration */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <Cpu className="h-5 w-5 text-primary" />
+                  <span>Claude (Anthropic)</span>
+                </CardTitle>
+                <CardDescription>
+                  Configure your Anthropic API key and Claude reasoning settings
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="anthropic-api-key">Anthropic API Key</Label>
+                  <div className="relative">
+                    <Input
+                      type={showAnthropicApiKey ? "text" : "password"}
+                      id="anthropic-api-key"
+                      name="ANTHROPIC_API_KEY"
+                      value={settings.ANTHROPIC_API_KEY || ''}
+                      onChange={handleChange}
+                      placeholder="Enter your Anthropic API key"
+                      className="pr-10"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="absolute right-0 top-0 h-10 w-10"
+                      onClick={() => setShowAnthropicApiKey(!showAnthropicApiKey)}
+                    >
+                      {showAnthropicApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Get your API key from console.anthropic.com
+                  </p>
+                </div>
+
+                <div className="space-y-3">
+                  <Label htmlFor="anthropic_reasoning_level">
+                    Extended Thinking Level: <Badge variant="outline">{settings.anthropic_reasoning_level}</Badge>
+                  </Label>
+                  <Select
+                    value={settings.anthropic_reasoning_level}
+                    onValueChange={(value) => handleSelectChange('anthropic_reasoning_level', value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select reasoning level" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="low">Low</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="high">High</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Controls extended thinking depth for Claude models (low: fast, high: more thorough)
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* ChatGPT (OpenAI) Configuration */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <Zap className="h-5 w-5 text-primary" />
+                  <span>ChatGPT (OpenAI)</span>
+                </CardTitle>
+                <CardDescription>
+                  Configure your OpenAI API key and GPT reasoning settings
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="openai-api-key">OpenAI API Key</Label>
+                  <div className="relative">
+                    <Input
+                      type={showOpenaiApiKey ? "text" : "password"}
+                      id="openai-api-key"
+                      name="OPENAI_API_KEY"
+                      value={settings.OPENAI_API_KEY || ''}
+                      onChange={handleChange}
+                      placeholder="Enter your OpenAI API key"
+                      className="pr-10"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="absolute right-0 top-0 h-10 w-10"
+                      onClick={() => setShowOpenaiApiKey(!showOpenaiApiKey)}
+                    >
+                      {showOpenaiApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Get your API key from platform.openai.com
+                  </p>
+                </div>
+
+                <div className="space-y-3">
+                  <Label htmlFor="openai_reasoning_effort">
+                    Reasoning Effort: <Badge variant="outline">{settings.openai_reasoning_effort}</Badge>
+                  </Label>
+                  <Select
+                    value={settings.openai_reasoning_effort}
+                    onValueChange={(value) => handleSelectChange('openai_reasoning_effort', value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select reasoning effort" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="low">Low</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="high">High</SelectItem>
+                      <SelectItem value="xhigh">XHigh</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Controls reasoning depth for GPT models (none: no reasoning, xhigh: maximum reasoning)
                   </p>
                 </div>
               </CardContent>

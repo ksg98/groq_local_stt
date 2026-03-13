@@ -13,9 +13,13 @@ function loadSettings() {
         // Return minimal defaults to avoid crashing downstream logic
         return {
             GROQ_API_KEY: process.env.GROQ_API_KEY || "<replace me>",
+            ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '',
+            OPENAI_API_KEY: process.env.OPENAI_API_KEY || '',
             model: process.env.GROQ_DEFAULT_MODEL || "llama-3.3-70b-versatile",
             temperature: 0.7,
             top_p: 0.95,
+            anthropic_reasoning_level: 'medium',
+            openai_reasoning_effort: 'medium',
             mcpServers: {},
             disabledMcpServers: [],
             customSystemPrompt: '',
@@ -40,10 +44,14 @@ function loadSettings() {
     const settingsPath = path.join(userDataPath, 'settings.json');
     const defaultSettings = {
         GROQ_API_KEY: process.env.GROQ_API_KEY || "<replace me>",
+        ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '',
+        OPENAI_API_KEY: process.env.OPENAI_API_KEY || '',
         model: process.env.GROQ_DEFAULT_MODEL || "llama-3.3-70b-versatile",
         temperature: 0.7,
         top_p: 0.95,
         reasoning_effort: 'medium',
+        anthropic_reasoning_level: 'medium',
+        openai_reasoning_effort: 'medium',
         mcpServers: {},
         disabledMcpServers: [],
         customSystemPrompt: '',
@@ -81,10 +89,24 @@ function loadSettings() {
                 settings.GROQ_API_KEY = settings.GROQ_API_KEY || defaultSettings.GROQ_API_KEY;
             }
 
+            // Anthropic and OpenAI API keys (env vars take precedence)
+            if (process.env.ANTHROPIC_API_KEY) {
+                settings.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+            } else {
+                settings.ANTHROPIC_API_KEY = settings.ANTHROPIC_API_KEY || defaultSettings.ANTHROPIC_API_KEY;
+            }
+            if (process.env.OPENAI_API_KEY) {
+                settings.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+            } else {
+                settings.OPENAI_API_KEY = settings.OPENAI_API_KEY || defaultSettings.OPENAI_API_KEY;
+            }
+
             settings.model = settings.model || defaultSettings.model;
             settings.temperature = settings.temperature ?? defaultSettings.temperature; // Use nullish coalescing
             settings.top_p = settings.top_p ?? defaultSettings.top_p;
             settings.reasoning_effort = settings.reasoning_effort || defaultSettings.reasoning_effort;
+            settings.anthropic_reasoning_level = settings.anthropic_reasoning_level || defaultSettings.anthropic_reasoning_level;
+            settings.openai_reasoning_effort = settings.openai_reasoning_effort || defaultSettings.openai_reasoning_effort;
             settings.mcpServers = settings.mcpServers || defaultSettings.mcpServers;
             settings.disabledMcpServers = settings.disabledMcpServers || defaultSettings.disabledMcpServers;
             settings.customSystemPrompt = settings.customSystemPrompt || defaultSettings.customSystemPrompt;

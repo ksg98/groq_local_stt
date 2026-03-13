@@ -1,3 +1,5 @@
+const { ANTHROPIC_MODELS, OPENAI_MODELS, getProviderForModel } = require('./providerModels');
+
 // Default fallback model configuration
 const DEFAULT_MODEL_CONFIG = {
   context: 8192,
@@ -29,6 +31,7 @@ function applyModelHeuristics(modelId, apiModelData) {
     context,
     vision_supported,
     builtin_tools_supported,
+    provider: 'groq',
   };
 }
 
@@ -164,7 +167,15 @@ function supportsBuiltInTools(modelName, modelContextSizes) {
 function getModelContextSizes(customModels = {}, apiModels = null) {
   // Start with API models if available, otherwise use base models
   const mergedModels = apiModels ? { ...apiModels } : { ...BASE_MODEL_CONTEXT_SIZES };
-  
+
+  // Merge static Anthropic and OpenAI models
+  Object.entries(ANTHROPIC_MODELS).forEach(([modelId, config]) => {
+    mergedModels[modelId] = { ...config };
+  });
+  Object.entries(OPENAI_MODELS).forEach(([modelId, config]) => {
+    mergedModels[modelId] = { ...config };
+  });
+
   // Add custom models to the merged object
   Object.entries(customModels).forEach(([modelId, config]) => {
     // Use explicit configuration only - no name-based heuristic
@@ -181,12 +192,13 @@ function getModelContextSizes(customModels = {}, apiModels = null) {
 }
 
 // Export all functions
-module.exports = { 
+module.exports = {
   MODEL_CONTEXT_SIZES: BASE_MODEL_CONTEXT_SIZES,
   getModelContextSizes,
   supportsBuiltInTools,
   getModelsFromAPIWithCache,
   fetchModelsFromAPI,
   convertAPIModelsToContextSizes,
-  applyModelHeuristics
+  applyModelHeuristics,
+  getProviderForModel
 };

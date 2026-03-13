@@ -24,12 +24,15 @@ mac:
   target:
     - dmg
     - zip
-  icon: build/icon.icns
+  icon: build/icon.png
   darkModeSupport: true
   hardenedRuntime: true
   gatekeeperAssess: false
   extendInfo:
     NSRequiresAquaSystemAppearance: false
+    NSMicrophoneUsageDescription: "Groq Desktop needs microphone access for speech-to-text functionality."
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
 
 # Windows Configuration
 win:

@@ -3,6 +3,7 @@ node_modules/
 # Electron build output
 dist/
 release/
+past_release/
 
 # OS generated files
 .DS_Store
