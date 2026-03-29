@@ -20,16 +20,24 @@ const ANTHROPIC_MODELS = {
 };
 
 const OPENAI_MODELS = {
-  'gpt-5': {
-    displayName: 'GPT-5',
+  'gpt-5.3-instant': {
+    displayName: 'GPT-5.3 Instant',
     context: 400000,
     vision_supported: true,
     builtin_tools_supported: false,
     provider: 'openai',
     max_tokens_default: 16384,
   },
-  'gpt-5-mini': {
-    displayName: 'GPT-5 Mini',
+  'gpt-5.4': {
+    displayName: 'GPT-5.4',
+    context: 1000000,
+    vision_supported: true,
+    builtin_tools_supported: false,
+    provider: 'openai',
+    max_tokens_default: 32768,
+  },
+  'gpt-5.4-mini': {
+    displayName: 'GPT-5.4 Mini',
     context: 400000,
     vision_supported: true,
     builtin_tools_supported: false,
