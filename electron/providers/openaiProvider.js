@@ -178,11 +178,11 @@ async function handleStream(
       apiParams.tools = tools;
     }
 
-    // Add reasoning effort
-    const reasoningEffort = settings.openai_reasoning_effort || 'medium';
+    // Add reasoning effort (GPT-5.4 supports: none, minimal, low, medium, high, xhigh)
+    const reasoningEffort = settings.openai_reasoning_effort || 'none';
     if (reasoningEffort !== 'none') {
       apiParams.reasoning = {
-        effort: reasoningEffort === 'xhigh' ? 'high' : reasoningEffort,
+        effort: reasoningEffort,
         summary: 'auto',
       };
     }
@@ -190,6 +190,7 @@ async function handleStream(
     console.log(
       `[OpenAIProvider] Starting stream for model ${model}, reasoning effort: ${reasoningEffort}`
     );
+    console.log('[OpenAIProvider] Request body:', JSON.stringify(apiParams, null, 2));
 
     event.sender.send('chat-stream-start', {
       id: streamId,

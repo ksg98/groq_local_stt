@@ -1311,13 +1311,15 @@ function Settings() {
                       <SelectValue placeholder="Select reasoning level" />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="none">None (disabled)</SelectItem>
                       <SelectItem value="low">Low</SelectItem>
                       <SelectItem value="medium">Medium</SelectItem>
                       <SelectItem value="high">High</SelectItem>
+                      <SelectItem value="adaptive">Adaptive (auto)</SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    Controls extended thinking depth for Claude models (low: fast, high: more thorough)
+                    Controls extended thinking for Claude models. Adaptive lets Claude decide thinking depth automatically.
                   </p>
                 </div>
               </CardContent>
@@ -1375,6 +1377,7 @@ function Settings() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="minimal">Minimal</SelectItem>
                       <SelectItem value="low">Low</SelectItem>
                       <SelectItem value="medium">Medium</SelectItem>
                       <SelectItem value="high">High</SelectItem>
@@ -1382,7 +1385,7 @@ function Settings() {
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    Controls reasoning depth for GPT models (none: no reasoning, xhigh: maximum reasoning)
+                    Controls reasoning depth for GPT models. GPT-5.4 defaults to none; temperature/top_p only work with none.
                   </p>
                 </div>
               </CardContent>

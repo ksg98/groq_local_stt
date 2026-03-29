@@ -1,6 +1,6 @@
 const Anthropic = require('@anthropic-ai/sdk');
 
-// Budget tokens for each reasoning level
+// Budget tokens for each reasoning level (fallback for 'enabled' mode)
 const REASONING_BUDGETS = {
   low: 1024,
   medium: 4096,
@@ -252,16 +252,23 @@ async function handleStream(
 
     // Add extended thinking based on reasoning level
     const reasoningLevel = settings.anthropic_reasoning_level || 'medium';
-    const budgetTokens = REASONING_BUDGETS[reasoningLevel] || REASONING_BUDGETS.medium;
-    params.thinking = {
-      type: 'enabled',
-      budget_tokens: budgetTokens,
-    };
-
-    // Temperature not compatible with extended thinking
-    // params.temperature = settings.temperature || 0.7;
+    if (reasoningLevel === 'none') {
+      params.thinking = { type: 'disabled' };
+      params.temperature = settings.temperature || 0.7;
+    } else if (reasoningLevel === 'adaptive') {
+      params.thinking = { type: 'adaptive' };
+      // Temperature not compatible with extended thinking
+    } else {
+      const budgetTokens = REASONING_BUDGETS[reasoningLevel] || REASONING_BUDGETS.medium;
+      params.thinking = {
+        type: 'enabled',
+        budget_tokens: budgetTokens,
+      };
+      // Temperature not compatible with extended thinking
+    }
 
     console.log(`[AnthropicProvider] Starting stream for model ${model}, reasoning: ${reasoningLevel}`);
+    console.log('[AnthropicProvider] Request body:', JSON.stringify(params, null, 2));
 
     event.sender.send('chat-stream-start', {
       id: streamId,
