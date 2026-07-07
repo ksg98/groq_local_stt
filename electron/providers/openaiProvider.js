@@ -117,7 +117,8 @@ async function handleStream(
   settings,
   modelContextSizes,
   discoveredTools,
-  { activeStreams, streamsBySender, cleanupStream }
+  { activeStreams, streamsBySender, cleanupStream },
+  options = {}
 ) {
   const senderId = event.sender.id;
 
@@ -178,8 +179,22 @@ async function handleStream(
       apiParams.tools = tools;
     }
 
-    // Add reasoning effort (GPT-5.4 supports: none, minimal, low, medium, high, xhigh)
-    const reasoningEffort = settings.openai_reasoning_effort || 'none';
+    // Add reasoning effort. The per-request effort from the UI wins over the
+    // settings default, clamped to what the model actually supports (derived
+    // from the dynamically-fetched model list).
+    const modelInfo = modelContextSizes[model] || {};
+    const supportedEfforts =
+      modelInfo.reasoning && Array.isArray(modelInfo.reasoning.efforts)
+        ? modelInfo.reasoning.efforts
+        : null;
+    let reasoningEffort = options.reasoningEffort || settings.openai_reasoning_effort || 'none';
+    if (modelInfo.provider === 'openai' && !modelInfo.reasoning) {
+      reasoningEffort = 'none'; // non-reasoning model — never send the param
+    } else if (supportedEfforts && !supportedEfforts.includes(reasoningEffort) && reasoningEffort !== 'none') {
+      reasoningEffort = supportedEfforts.includes('medium')
+        ? 'medium'
+        : supportedEfforts[supportedEfforts.length - 1];
+    }
     if (reasoningEffort !== 'none') {
       apiParams.reasoning = {
         effort: reasoningEffort,

@@ -80,6 +80,7 @@ function App() {
   } = useChat(); // Use context state
   const [loading, setLoading] = useState(false);
   const [selectedModel, setSelectedModel] = useState('llama-3.3-70b-versatile');
+  const [reasoningEffort, setReasoningEffort] = useState('medium');
   const [mcpTools, setMcpTools] = useState([]);
   const [isToolsPanelOpen, setIsToolsPanelOpen] = useState(false);
   const [mcpServersStatus, setMcpServersStatus] = useState({ loading: false, message: "" });
@@ -709,6 +710,15 @@ function App() {
     }
   }, [selectedModel, modelConfigs]);
 
+  // Keep the reasoning effort valid for the selected model (each model
+  // reports its own supported effort levels via the dynamic model configs)
+  useEffect(() => {
+    const efforts = modelConfigs?.[selectedModel]?.reasoning?.efforts;
+    if (efforts && efforts.length > 0 && !efforts.includes(reasoningEffort)) {
+      setReasoningEffort(efforts.includes('medium') ? 'medium' : efforts[efforts.length - 1]);
+    }
+  }, [selectedModel, modelConfigs, reasoningEffort]);
+
   // Function to stop the ongoing generation
   const handleStopGeneration = () => {
     console.log('Stopping generation...');
@@ -763,7 +773,7 @@ function App() {
         setMessages(prev => [...prev, assistantPlaceholder]);
 
         // Start streaming chat
-        const streamHandler = window.electron.startChatStream(turnMessages, selectedModel);
+        const streamHandler = window.electron.startChatStream(turnMessages, selectedModel, { reasoningEffort });
 
             // Collect the final message data
         let finalAssistantData = {
@@ -1853,6 +1863,8 @@ function App() {
                     onModelChange={setSelectedModel}
                     onOpenMcpTools={() => setIsToolsPanelOpen(true)}
                     modelConfigs={modelConfigs}
+                    reasoningEffort={reasoningEffort}
+                    onReasoningEffortChange={setReasoningEffort}
                   />
                 </div>
               </div>
@@ -1886,6 +1898,8 @@ function App() {
                     onModelChange={setSelectedModel}
                     onOpenMcpTools={() => setIsToolsPanelOpen(true)}
                     modelConfigs={modelConfigs}
+                    reasoningEffort={reasoningEffort}
+                    onReasoningEffortChange={setReasoningEffort}
                   />
                 </div>
               </div>

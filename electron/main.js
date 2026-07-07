@@ -24,6 +24,7 @@ const { BrowserWindow, ipcMain, screen, shell } = require('electron');
 
 // Import shared models
 const { MODEL_CONTEXT_SIZES, getModelContextSizes, getModelsFromAPIWithCache } = require('../shared/models.js');
+const { getProviderModels } = require('../shared/providerModels.js');
 
 // Import handlers
 const chatHandler = require('./chatHandler');
@@ -233,7 +234,15 @@ app.whenReady().then(async () => {
       }
     }
     
-    const mergedModelContextSizes = getModelContextSizes(currentSettings.customModels || {}, apiModels);
+    // Fetch OpenAI/Anthropic model lists dynamically (cached, static fallback)
+    let providerModels = null;
+    try {
+      providerModels = await getProviderModels(currentSettings);
+    } catch (error) {
+      console.error('Error fetching provider models in get-model-configs:', error);
+    }
+
+    const mergedModelContextSizes = getModelContextSizes(currentSettings.customModels || {}, apiModels, providerModels);
     return JSON.parse(JSON.stringify(mergedModelContextSizes));
   });
 
@@ -324,10 +333,10 @@ app.whenReady().then(async () => {
 
   // --- Register Core App IPC Handlers --- //
   // Chat completion (use module object)
-  ipcMain.on('chat-stream', async (event, messages, model) => {
+  ipcMain.on('chat-stream', async (event, messages, model, options) => {
     const currentSettings = loadSettings();
     const { discoveredTools } = mcpManager.getMcpState(); // Use module object
-    
+
     // Try to get fresh models from API
     let apiModels = modelContextSizes;
     if (currentSettings.GROQ_API_KEY && currentSettings.GROQ_API_KEY !== "<replace me>") {
@@ -338,11 +347,19 @@ app.whenReady().then(async () => {
         // Fall back to cached modelContextSizes
       }
     }
-    
+
+    // Fetch OpenAI/Anthropic model lists dynamically (cached, static fallback)
+    let providerModels = null;
+    try {
+      providerModels = await getProviderModels(currentSettings);
+    } catch (error) {
+      console.error('Error fetching provider models in chat-stream:', error);
+    }
+
     // Merge API models with custom models from settings
-    const mergedModelContextSizes = getModelContextSizes(currentSettings.customModels || {}, apiModels);
-    
-    chatHandler.handleChatStream(event, messages, model, currentSettings, mergedModelContextSizes, discoveredTools);
+    const mergedModelContextSizes = getModelContextSizes(currentSettings.customModels || {}, apiModels, providerModels);
+
+    chatHandler.handleChatStream(event, messages, model, currentSettings, mergedModelContextSizes, discoveredTools, options || {});
   });
 
   // Stop chat stream

@@ -13,7 +13,8 @@ function routeToProvider(
   settings,
   modelContextSizes,
   discoveredTools,
-  streamUtils
+  streamUtils,
+  options = {}
 ) {
   const provider = getProviderForModel(model, modelContextSizes);
 
@@ -26,7 +27,8 @@ function routeToProvider(
         settings,
         modelContextSizes,
         discoveredTools,
-        streamUtils
+        streamUtils,
+        options
       );
       return true;
 
@@ -38,7 +40,8 @@ function routeToProvider(
         settings,
         modelContextSizes,
         discoveredTools,
-        streamUtils
+        streamUtils,
+        options
       );
       return true;
 

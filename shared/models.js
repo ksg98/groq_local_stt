@@ -164,15 +164,14 @@ function supportsBuiltInTools(modelName, modelContextSizes) {
 }
 
 // Function to merge base models with custom models from settings
-function getModelContextSizes(customModels = {}, apiModels = null) {
+function getModelContextSizes(customModels = {}, apiModels = null, providerModels = null) {
   // Start with API models if available, otherwise use base models
   const mergedModels = apiModels ? { ...apiModels } : { ...BASE_MODEL_CONTEXT_SIZES };
 
-  // Merge static Anthropic and OpenAI models
-  Object.entries(ANTHROPIC_MODELS).forEach(([modelId, config]) => {
-    mergedModels[modelId] = { ...config };
-  });
-  Object.entries(OPENAI_MODELS).forEach(([modelId, config]) => {
+  // Merge Anthropic and OpenAI models — dynamically fetched when available,
+  // otherwise the static fallback definitions
+  const nonGroqModels = providerModels || { ...ANTHROPIC_MODELS, ...OPENAI_MODELS };
+  Object.entries(nonGroqModels).forEach(([modelId, config]) => {
     mergedModels[modelId] = { ...config };
   });
 

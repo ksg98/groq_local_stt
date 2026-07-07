@@ -17,6 +17,8 @@ function ChatInput({
 	onModelChange,
 	onOpenMcpTools,
 	modelConfigs = {},
+	reasoningEffort = "medium",
+	onReasoningEffortChange,
 }) {
 	const [message, setMessage] = useState("");
 	const [suggestion, setSuggestion] = useState("");
@@ -47,6 +49,16 @@ function ChatInput({
 			return nameA.localeCompare(nameB);
 		});
 	}, [models, modelConfigs]);
+
+	// Reasoning effort levels supported by the selected model (from the
+	// dynamically-fetched model configs); empty = no effort selector shown
+	const effortOptions = useMemo(() => {
+		const info = modelConfigs[selectedModel];
+		return info?.reasoning?.efforts || [];
+	}, [selectedModel, modelConfigs]);
+
+	const getEffortLabel = (level) =>
+		level ? level.charAt(0).toUpperCase() + level.slice(1) : level;
 	const [isDragOver, setIsDragOver] = useState(false);
 	const [fullScreenImage, setFullScreenImage] = useState(null);
 	const textareaRef = useRef(null);
@@ -619,6 +631,21 @@ function ChatInput({
 							</div>
 						)}
 						
+						{/* Reasoning Effort Selector (only for models that support it) */}
+						{effortOptions.length > 0 && (
+							<SearchableSelect
+								value={effortOptions.includes(reasoningEffort) ? reasoningEffort : effortOptions[0]}
+								onValueChange={onReasoningEffortChange}
+								options={effortOptions}
+								placeholder="Effort"
+								className="w-28"
+								disabled={loading}
+								getDisplayValue={(value) => getEffortLabel(value)}
+								getOptionLabel={(level) => getEffortLabel(level)}
+								getOptionValue={(level) => level}
+							/>
+						)}
+
 						{/* Model Selector */}
 						<SearchableSelect
 							value={selectedModel}

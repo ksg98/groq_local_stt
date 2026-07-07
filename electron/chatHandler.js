@@ -1477,7 +1477,7 @@ async function handleResponsesApiStream(event, messages, model, settings, modelC
  * @param {object} modelContextSizes - Model capability metadata
  * @param {Array<object>} discoveredTools - Available MCP tools
  */
-async function handleChatStream(event, messages, model, settings, modelContextSizes, discoveredTools) {
+async function handleChatStream(event, messages, model, settings, modelContextSizes, discoveredTools, options = {}) {
     // Get sender ID to track streams per webContents (prevents duplicate streams during HMR)
     const senderId = event.sender.id;
 
@@ -1496,7 +1496,8 @@ async function handleChatStream(event, messages, model, settings, modelContextSi
     // Route to non-Groq provider if applicable
     const handled = routeToProvider(
         event, messages, model, settings, modelContextSizes, discoveredTools,
-        { activeStreams, streamsBySender, cleanupStream }
+        { activeStreams, streamsBySender, cleanupStream },
+        options
     );
     if (handled) return;
 

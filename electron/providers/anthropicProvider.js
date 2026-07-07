@@ -186,7 +186,8 @@ async function handleStream(
   settings,
   modelContextSizes,
   discoveredTools,
-  { activeStreams, streamsBySender, cleanupStream }
+  { activeStreams, streamsBySender, cleanupStream },
+  options = {}
 ) {
   const senderId = event.sender.id;
 
@@ -250,19 +251,42 @@ async function handleStream(
       params.tools = tools;
     }
 
-    // Add extended thinking based on reasoning level
-    const reasoningLevel = settings.anthropic_reasoning_level || 'medium';
-    if (reasoningLevel === 'none') {
+    // Add extended thinking. The per-request effort from the UI wins over the
+    // settings default; the model's dynamically-fetched capabilities decide
+    // which API shape to use (adaptive + effort vs. budget_tokens).
+    const modelReasoning = modelInfo.reasoning || null;
+    const supportedEfforts =
+      modelReasoning && Array.isArray(modelReasoning.efforts) ? modelReasoning.efforts : null;
+    let reasoningLevel = options.reasoningEffort || settings.anthropic_reasoning_level || 'medium';
+    if (supportedEfforts && supportedEfforts.length && !supportedEfforts.includes(reasoningLevel) && reasoningLevel !== 'adaptive') {
+      reasoningLevel = supportedEfforts.includes('medium')
+        ? 'medium'
+        : supportedEfforts[supportedEfforts.length - 1];
+    }
+
+    const useAdaptive = modelReasoning
+      ? modelReasoning.mode === 'adaptive'
+      : reasoningLevel === 'adaptive';
+    if (useAdaptive) {
+      if (reasoningLevel === 'none') {
+        // Omit the thinking param entirely — an explicit {type: 'disabled'}
+        // is rejected by always-on-thinking models (e.g. Claude Fable 5),
+        // while omitting is accepted everywhere. No sampling params either.
+      } else {
+        params.thinking = { type: 'adaptive' };
+        if (reasoningLevel !== 'adaptive') {
+          params.output_config = { effort: reasoningLevel };
+        }
+      }
+      // Temperature not compatible with extended thinking
+    } else if (reasoningLevel === 'none') {
       params.thinking = { type: 'disabled' };
       params.temperature = settings.temperature || 0.7;
-    } else if (reasoningLevel === 'adaptive') {
-      params.thinking = { type: 'adaptive' };
-      // Temperature not compatible with extended thinking
     } else {
       const budgetTokens = REASONING_BUDGETS[reasoningLevel] || REASONING_BUDGETS.medium;
       params.thinking = {
         type: 'enabled',
-        budget_tokens: budgetTokens,
+        budget_tokens: Math.min(budgetTokens, Math.max(1024, maxTokens - 1024)),
       };
       // Temperature not compatible with extended thinking
     }
