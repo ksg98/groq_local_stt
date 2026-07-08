@@ -207,6 +207,7 @@ contextBridge.exposeInMainWorld('electron', {
   // Text-to-Speech (Kokoro sidecar)
   tts: {
     isSupported: () => ipcRenderer.invoke('tts-supported'),
+    getState: () => ipcRenderer.invoke('tts-state'),
     start: () => ipcRenderer.invoke('tts-start'),
     speak: (request) => ipcRenderer.invoke('tts-speak', request),
     cancel: () => ipcRenderer.invoke('tts-cancel'),

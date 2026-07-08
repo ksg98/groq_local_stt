@@ -50,6 +50,36 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
       .catch(() => setSupported(false));
   }, []);
 
+  // Track the sidecar lifecycle independently of the agent session so the UI
+  // can always show whether the Kokoro model is loaded in RAM.
+  const [sidecarState, setSidecarState] = useState('stopped');
+  useEffect(() => {
+    let disposed = false;
+    window.electron?.tts
+      ?.getState?.()
+      .then((state) => {
+        if (!disposed && state) setSidecarState(state.running ? state.state : 'stopped');
+      })
+      .catch(() => {});
+    const unsubscribe =
+      window.electron?.tts?.onStatus?.((status) => setSidecarState(status.state)) || (() => {});
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
+  }, []);
+
+  // Preload the Kokoro model without starting a voice session
+  const loadTts = useCallback(() => {
+    window.electron.tts.start().catch(() => {});
+  }, []);
+
+  // Kill the sidecar to free RAM (no-op while a voice session is running)
+  const unloadTts = useCallback(() => {
+    if (activeRef.current) return;
+    window.electron.tts.stop().catch(() => {});
+  }, []);
+
   const deriveState = useCallback(() => {
     if (!activeRef.current) return 'idle';
     if (errorRef.current) return 'error';
@@ -303,6 +333,11 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
     active,
     agentState,
     ttsStatus,
+    sidecarState,
+    sidecarLoaded: sidecarState === 'ready',
+    sidecarLoading: sidecarState === 'starting' || sidecarState === 'loading',
+    loadTts,
+    unloadTts,
     start,
     stop,
     toggle,

@@ -189,6 +189,12 @@ function initializeTtsHandlers(ipcMain, app) {
 
   ipcMain.handle('tts-supported', () => isSupported());
 
+  // Current sidecar state so the UI can show whether the model sits in RAM
+  ipcMain.handle('tts-state', () => ({
+    running: !!child,
+    state: child ? lastStatus.state || 'starting' : 'stopped',
+  }));
+
   ipcMain.handle('tts-start', (event) => startSidecar(event.sender));
 
   ipcMain.handle('tts-speak', (_event, { id, text, voice, speed } = {}) => {
