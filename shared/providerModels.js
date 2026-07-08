@@ -78,41 +78,42 @@ const OPENAI_MODELS = {
 // before calling the backend. The backend has no /v1/models, so this list is
 // static.
 const CHATGPT_MODEL_PREFIX = 'chatgpt:';
-// Current lineup per developers.openai.com/codex/models (July 2026):
-// gpt-5.5, gpt-5.4, gpt-5.4-mini, gpt-5.3-codex-spark (Pro plans only).
-// gpt-5.2 / gpt-5.3-codex are deprecated for ChatGPT sign-in. Note:
-// "GPT-5.5 Instant" is the ChatGPT consumer app model (API: chat-latest),
-// not served by the Codex backend — it cannot be listed here.
+const CHATGPT_CODEX_BASE_URL = 'https://chatgpt.com/backend-api/codex';
+const CHATGPT_CLIENT_VERSION = '0.143.0'; // codex CLI version we present as
+
+// Static fallback when the live catalog can't be fetched (values verified
+// against the live /models response, July 2026). The real list comes from
+// fetchChatgptModels below — the same catalog endpoint the Codex CLI uses.
 const CHATGPT_MODELS = {
   'chatgpt:gpt-5.5': {
     displayName: 'GPT-5.5 (ChatGPT)',
-    context: 400000,
+    context: 272000,
     vision_supported: true,
     builtin_tools_supported: false,
     provider: 'openai',
     max_tokens_default: 32768,
-    reasoning: { supported: true, mode: 'effort', efforts: ['none', 'low', 'medium', 'high', 'xhigh'] },
+    reasoning: { supported: true, mode: 'effort', efforts: ['low', 'medium', 'high', 'xhigh'] },
   },
   'chatgpt:gpt-5.4': {
     displayName: 'GPT-5.4 (ChatGPT)',
-    context: 400000,
+    context: 272000,
     vision_supported: true,
     builtin_tools_supported: false,
     provider: 'openai',
     max_tokens_default: 32768,
-    reasoning: { supported: true, mode: 'effort', efforts: ['none', 'low', 'medium', 'high', 'xhigh'] },
+    reasoning: { supported: true, mode: 'effort', efforts: ['low', 'medium', 'high', 'xhigh'] },
   },
   'chatgpt:gpt-5.4-mini': {
     displayName: 'GPT-5.4 Mini (ChatGPT)',
-    context: 400000,
+    context: 272000,
     vision_supported: true,
     builtin_tools_supported: false,
     provider: 'openai',
     max_tokens_default: 16384,
-    reasoning: { supported: true, mode: 'effort', efforts: ['none', 'low', 'medium', 'high', 'xhigh'] },
+    reasoning: { supported: true, mode: 'effort', efforts: ['low', 'medium', 'high', 'xhigh'] },
   },
   'chatgpt:gpt-5.3-codex-spark': {
-    displayName: 'GPT-5.3 Codex Spark (ChatGPT Pro)',
+    displayName: 'GPT-5.3 Codex Spark (ChatGPT)',
     context: 128000,
     vision_supported: false, // text-only research preview
     builtin_tools_supported: false,
@@ -121,6 +122,54 @@ const CHATGPT_MODELS = {
     reasoning: { supported: true, mode: 'effort', efforts: ['low', 'medium', 'high', 'xhigh'] },
   },
 };
+
+/**
+ * Fetch the live model catalog served to Codex clients signed in with a
+ * ChatGPT subscription: GET {codex backend}/models?client_version=X with the
+ * same auth headers as /responses. Returns { 'chatgpt:<slug>': config }.
+ */
+async function fetchChatgptModels({ token, accountId }) {
+  const response = await fetch(
+    `${CHATGPT_CODEX_BASE_URL}/models?client_version=${CHATGPT_CLIENT_VERSION}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        originator: 'codex_cli_rs',
+        'User-Agent': `codex_cli_rs/${CHATGPT_CLIENT_VERSION}`,
+        ...(accountId ? { 'chatgpt-account-id': accountId } : {}),
+      },
+    }
+  );
+  if (!response.ok) {
+    throw new Error(`ChatGPT models fetch failed: HTTP ${response.status}`);
+  }
+  const data = await response.json();
+  const models = {};
+  for (const model of data.models || []) {
+    if (!model.slug) continue;
+    if (model.visibility && model.visibility !== 'list') continue; // internal/hidden
+    const efforts = Array.isArray(model.supported_reasoning_levels)
+      ? model.supported_reasoning_levels
+          .map((level) => (typeof level === 'string' ? level : level.effort))
+          .filter(Boolean)
+      : [];
+    models[`${CHATGPT_MODEL_PREFIX}${model.slug}`] = {
+      displayName: `${model.display_name || model.slug} (ChatGPT)`,
+      context: model.context_window || 272000,
+      vision_supported: true,
+      builtin_tools_supported: false,
+      provider: 'openai',
+      max_tokens_default: 32768,
+      ...(efforts.length > 0
+        ? { reasoning: { supported: true, mode: 'effort', efforts } }
+        : {}),
+    };
+  }
+  if (Object.keys(models).length === 0) {
+    throw new Error('ChatGPT models list came back empty');
+  }
+  return models;
+}
 
 function isValidKey(key) {
   return (
@@ -311,7 +360,39 @@ async function fetchOpenAIModels(apiKey) {
 const providerCaches = {
   anthropic: { models: null, ts: 0 },
   openai: { models: null, ts: 0 },
+  chatgpt: { models: null, ts: 0 },
 };
+
+// Live ChatGPT subscription catalog with cache; static fallback when the
+// access token is missing/expired or the fetch fails.
+async function getChatgptModels(settings) {
+  const signedIn = !!(settings.chatgptRefreshToken && settings.chatgptRefreshToken.trim());
+  if (!signedIn) return {};
+
+  const cache = providerCaches.chatgpt;
+  const now = Date.now();
+  if (cache.models && now - cache.ts < CACHE_DURATION) {
+    return cache.models;
+  }
+
+  const tokenFresh =
+    settings.chatgptAccessToken && (settings.chatgptTokenExpiresAt || 0) - now > 60 * 1000;
+  if (!tokenFresh) {
+    return cache.models || CHATGPT_MODELS;
+  }
+
+  try {
+    cache.models = await fetchChatgptModels({
+      token: settings.chatgptAccessToken,
+      accountId: settings.chatgptAccountId,
+    });
+    cache.ts = now;
+    return cache.models;
+  } catch (err) {
+    console.error('[ProviderModels] Failed to fetch ChatGPT models:', err.message);
+    return cache.models || CHATGPT_MODELS;
+  }
+}
 
 async function getCachedProviderModels(provider, apiKey, fetcher, staticFallback) {
   if (!isValidKey(apiKey)) {
@@ -341,14 +422,14 @@ async function getCachedProviderModels(provider, apiKey, fetcher, staticFallback
  * definitions per provider when no key is configured or the fetch fails.
  */
 async function getProviderModels(settings = {}) {
-  const [anthropic, openai] = await Promise.all([
+  // ChatGPT subscription models (when signed in) are offered in addition to
+  // the API-key models — both auth modes work side by side.
+  const [anthropic, openai, chatgpt] = await Promise.all([
     getCachedProviderModels('anthropic', settings.ANTHROPIC_API_KEY, fetchAnthropicModels, ANTHROPIC_MODELS),
     getCachedProviderModels('openai', settings.OPENAI_API_KEY, fetchOpenAIModels, OPENAI_MODELS),
+    getChatgptModels(settings),
   ]);
-  // Signed in with a ChatGPT subscription: subscription models are offered in
-  // addition to the API-key models (both auth modes work side by side).
-  const chatgptSignedIn = !!(settings.chatgptRefreshToken && settings.chatgptRefreshToken.trim());
-  return { ...anthropic, ...openai, ...(chatgptSignedIn ? CHATGPT_MODELS : {}) };
+  return { ...anthropic, ...openai, ...chatgpt };
 }
 
 /**
@@ -358,7 +439,7 @@ async function getProviderModels(settings = {}) {
 function getProviderForModel(modelId, modelContextSizes) {
   if (ANTHROPIC_MODELS[modelId]) return 'anthropic';
   if (OPENAI_MODELS[modelId]) return 'openai';
-  if (CHATGPT_MODELS[modelId]) return 'openai';
+  if (modelId && modelId.startsWith(CHATGPT_MODEL_PREFIX)) return 'openai';
 
   // Check if the model in modelContextSizes has a provider field
   const modelInfo = modelContextSizes && modelContextSizes[modelId];
