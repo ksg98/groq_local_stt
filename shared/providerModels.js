@@ -78,7 +78,21 @@ const OPENAI_MODELS = {
 // before calling the backend. The backend has no /v1/models, so this list is
 // static.
 const CHATGPT_MODEL_PREFIX = 'chatgpt:';
+// Current lineup per developers.openai.com/codex/models (July 2026):
+// gpt-5.5, gpt-5.4, gpt-5.4-mini, gpt-5.3-codex-spark (Pro plans only).
+// gpt-5.2 / gpt-5.3-codex are deprecated for ChatGPT sign-in. Note:
+// "GPT-5.5 Instant" is the ChatGPT consumer app model (API: chat-latest),
+// not served by the Codex backend — it cannot be listed here.
 const CHATGPT_MODELS = {
+  'chatgpt:gpt-5.5': {
+    displayName: 'GPT-5.5 (ChatGPT)',
+    context: 400000,
+    vision_supported: true,
+    builtin_tools_supported: false,
+    provider: 'openai',
+    max_tokens_default: 32768,
+    reasoning: { supported: true, mode: 'effort', efforts: ['none', 'low', 'medium', 'high', 'xhigh'] },
+  },
   'chatgpt:gpt-5.4': {
     displayName: 'GPT-5.4 (ChatGPT)',
     context: 400000,
@@ -88,22 +102,22 @@ const CHATGPT_MODELS = {
     max_tokens_default: 32768,
     reasoning: { supported: true, mode: 'effort', efforts: ['none', 'low', 'medium', 'high', 'xhigh'] },
   },
-  'chatgpt:gpt-5.4-codex': {
-    displayName: 'GPT-5.4 Codex (ChatGPT)',
+  'chatgpt:gpt-5.4-mini': {
+    displayName: 'GPT-5.4 Mini (ChatGPT)',
     context: 400000,
     vision_supported: true,
     builtin_tools_supported: false,
     provider: 'openai',
-    max_tokens_default: 32768,
-    reasoning: { supported: true, mode: 'effort', efforts: ['low', 'medium', 'high', 'xhigh'] },
+    max_tokens_default: 16384,
+    reasoning: { supported: true, mode: 'effort', efforts: ['none', 'low', 'medium', 'high', 'xhigh'] },
   },
-  'chatgpt:gpt-5.3-codex': {
-    displayName: 'GPT-5.3 Codex (ChatGPT)',
-    context: 400000,
-    vision_supported: true,
+  'chatgpt:gpt-5.3-codex-spark': {
+    displayName: 'GPT-5.3 Codex Spark (ChatGPT Pro)',
+    context: 128000,
+    vision_supported: false, // text-only research preview
     builtin_tools_supported: false,
     provider: 'openai',
-    max_tokens_default: 32768,
+    max_tokens_default: 16384,
     reasoning: { supported: true, mode: 'effort', efforts: ['low', 'medium', 'high', 'xhigh'] },
   },
 };
