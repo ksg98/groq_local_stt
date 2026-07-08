@@ -93,6 +93,15 @@ const CHATGPT_MODELS = {
     max_tokens_default: 32768,
     reasoning: { supported: true, mode: 'effort', efforts: ['none', 'low', 'medium', 'high', 'xhigh'] },
   },
+  'chatgpt:gpt-5.5-codex': {
+    displayName: 'GPT-5.5 Codex (ChatGPT)',
+    context: 400000,
+    vision_supported: true,
+    builtin_tools_supported: false,
+    provider: 'openai',
+    max_tokens_default: 32768,
+    reasoning: { supported: true, mode: 'effort', efforts: ['low', 'medium', 'high', 'xhigh'] },
+  },
   'chatgpt:gpt-5.4': {
     displayName: 'GPT-5.4 (ChatGPT)',
     context: 400000,
@@ -101,6 +110,15 @@ const CHATGPT_MODELS = {
     provider: 'openai',
     max_tokens_default: 32768,
     reasoning: { supported: true, mode: 'effort', efforts: ['none', 'low', 'medium', 'high', 'xhigh'] },
+  },
+  'chatgpt:gpt-5.4-codex': {
+    displayName: 'GPT-5.4 Codex (ChatGPT)',
+    context: 400000,
+    vision_supported: true,
+    builtin_tools_supported: false,
+    provider: 'openai',
+    max_tokens_default: 32768,
+    reasoning: { supported: true, mode: 'effort', efforts: ['low', 'medium', 'high', 'xhigh'] },
   },
   'chatgpt:gpt-5.4-mini': {
     displayName: 'GPT-5.4 Mini (ChatGPT)',
