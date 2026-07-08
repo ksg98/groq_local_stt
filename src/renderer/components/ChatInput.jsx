@@ -1,4 +1,4 @@
-import { ArrowUp, Loader2, ImagePlus, Hammer, Upload, Zap, ZapOff, Square, Mic, MicOff, X, AudioLines, Monitor, Camera, Volume2, VolumeX } from "lucide-react";
+import { ArrowUp, Loader2, ImagePlus, Hammer, Upload, Zap, ZapOff, Square, Mic, MicOff, X, AudioLines, Monitor, Camera, Volume2, VolumeX, Check } from "lucide-react";
 import React, { useContext, useEffect, useRef, useState, useMemo, useCallback } from "react";
 import TextAreaAutosize from "react-textarea-autosize";
 import { SearchableSelect } from "./ui/SearchableSelect";
@@ -626,6 +626,17 @@ function ChatInput({
 								<span className="text-sm font-medium text-red-600 tabular-nums">
 									{isTranscribing ? 'Processing...' : formattedDuration}
 								</span>
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									onClick={isRecording ? stopRecording : undefined}
+									className="p-1 h-6 w-6 text-green-700 hover:text-green-800 hover:bg-green-500/20 rounded-lg"
+									title="Finish and transcribe (same as releasing Space)"
+									disabled={isTranscribing}
+								>
+									<Check className="w-4 h-4" />
+								</Button>
 								<Button
 									type="button"
 									variant="ghost"
