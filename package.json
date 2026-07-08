@@ -98,7 +98,13 @@
       "output": "release"
     },
     "mac": {
-      "category": "public.app-category.productivity"
+      "category": "public.app-category.productivity",
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Groq Desktop needs microphone access for voice input and the voice agent.",
+        "NSCameraUsageDescription": "Groq Desktop needs camera access to share your camera with the model."
+      }
     },
     "win": {
       "target": [
