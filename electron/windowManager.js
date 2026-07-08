@@ -28,10 +28,11 @@ function createWindow(screen, BrowserWindow) {
     }
   });
 
-  // Determine URL based on environment
+  // Determine URL based on environment. Production uses the privileged app://
+  // scheme (registered in main.js) so fetch()-loaded assets (VAD onnx/wasm) work.
   const startUrl = process.env.NODE_ENV === 'development'
     ? 'http://localhost:5173'
-    : `file://${path.join(__dirname, '../dist/index.html')}`;
+    : 'app://bundle/index.html';
 
   mainWindow.loadURL(startUrl);
 
@@ -72,7 +73,7 @@ function initializeWindowManager(app, screen, shell, BrowserWindow) {
     // Handle clicked links in the app (prevent navigation away from app)
     createdWindow.webContents.on('will-navigate', (event, url) => {
       const startUrlDev = 'http://localhost:5173';
-      const startUrlProd = `file://${path.join(__dirname, '../dist/index.html')}`;
+      const startUrlProd = 'app://bundle/index.html';
 
       // Check if the URL is external
       if ((url.startsWith('http:') || url.startsWith('https:')) &&

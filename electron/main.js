@@ -20,7 +20,18 @@ const logStream = fs.createWriteStream(logFile, { flags: 'a' });
 console.log('Groq Desktop started, logging to', logFile);
 
 // Import necessary Electron modules
-const { BrowserWindow, ipcMain, screen, shell } = require('electron');
+const { BrowserWindow, ipcMain, screen, shell, protocol, net } = require('electron');
+const { pathToFileURL } = require('url');
+
+// The production renderer is served over a privileged custom scheme instead of
+// file:// because Chromium cannot fetch() file: URLs — which is how the Silero
+// VAD assets (onnx/wasm/worklet) are loaded. Must be registered before ready.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'app',
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true },
+  },
+]);
 
 // Import shared models
 const { MODEL_CONTEXT_SIZES, getModelContextSizes, getModelsFromAPIWithCache } = require('../shared/models.js');
@@ -47,6 +58,10 @@ const chatHistoryManager = require('./chatHistoryManager');
 
 // Import speech-to-text handler
 const speechToTextHandler = require('./speechToTextHandler');
+
+// Import TTS (Kokoro sidecar) and screen/camera capture handlers
+const ttsHandler = require('./ttsHandler');
+const captureHandler = require('./captureHandler');
 
 // Global variable to hold the main window instance
 let mainWindow;
@@ -199,6 +214,23 @@ app.on('open-url', (event, url) => {
 app.whenReady().then(async () => {
   console.log("App Ready. Initializing...");
 
+  // Serve the built renderer (dist/) over app://bundle/ in production
+  if (process.env.NODE_ENV !== 'development') {
+    const distRoot = path.join(__dirname, '../dist');
+    protocol.handle('app', (request) => {
+      const { pathname } = new URL(request.url);
+      let filePath = path.normalize(path.join(distRoot, decodeURIComponent(pathname)));
+      if (!filePath.startsWith(distRoot)) {
+        return new Response('Forbidden', { status: 403 });
+      }
+      if (filePath === distRoot || filePath === distRoot + path.sep) {
+        filePath = path.join(distRoot, 'index.html');
+      }
+      return net.fetch(pathToFileURL(filePath).toString());
+    });
+    console.log('app:// protocol serving', distRoot);
+  }
+
   // Initialize command resolver first (might be needed by others)
   initializeCommandResolver(app);
 
@@ -299,6 +331,11 @@ app.whenReady().then(async () => {
   // Initialize speech-to-text handler
   speechToTextHandler.initializeSpeechToTextHandlers(ipcMain, loadSettings);
   console.log("[Main Init] Speech-to-text handler initialized");
+
+  // Initialize TTS (Kokoro sidecar) and capture handlers
+  ttsHandler.initializeTtsHandlers(ipcMain, app);
+  captureHandler.initializeCaptureHandlers(ipcMain);
+  console.log("[Main Init] TTS and capture handlers initialized");
 
   // Initialize MCP handlers (use module object)
   mcpManager.initializeMcpHandlers(ipcMain, app, mainWindow, loadSettings, resolveCommandPath);
@@ -465,9 +502,10 @@ if (!gotTheLock) {
   // Continue with app initialization
 }
 
-// Clean up context capture on app quit
+// Clean up context capture and the TTS sidecar on app quit
 app.on('before-quit', () => {
   cleanupContextCapture();
+  ttsHandler.shutdown();
 });
 
 // Note: App lifecycle events (window-all-closed, activate) are now handled by windowManager.js

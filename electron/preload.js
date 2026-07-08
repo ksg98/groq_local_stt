@@ -199,6 +199,47 @@ contextBridge.exposeInMainWorld('electron', {
   // Speech-to-Text
   speechToText: {
     transcribe: (audioData, options) => ipcRenderer.invoke('speech-to-text-transcribe', audioData, options),
+    getMicPermissionStatus: () => ipcRenderer.invoke('speech-to-text-mic-permission-status'),
+    requestMicPermission: () => ipcRenderer.invoke('speech-to-text-request-mic-permission'),
+    openMicSettings: () => ipcRenderer.invoke('speech-to-text-open-mic-settings'),
+  },
+
+  // Text-to-Speech (Kokoro sidecar)
+  tts: {
+    isSupported: () => ipcRenderer.invoke('tts-supported'),
+    start: () => ipcRenderer.invoke('tts-start'),
+    speak: (request) => ipcRenderer.invoke('tts-speak', request),
+    cancel: () => ipcRenderer.invoke('tts-cancel'),
+    stop: () => ipcRenderer.invoke('tts-stop'),
+    onStatus: (callback) => {
+      const listener = (_event, status) => callback(status);
+      ipcRenderer.on('tts-status', listener);
+      return () => ipcRenderer.removeListener('tts-status', listener);
+    },
+    onAudioChunk: (callback) => {
+      const listener = (_event, data) => callback(data);
+      ipcRenderer.on('tts-audio-chunk', listener);
+      return () => ipcRenderer.removeListener('tts-audio-chunk', listener);
+    },
+    onSpeakDone: (callback) => {
+      const listener = (_event, data) => callback(data);
+      ipcRenderer.on('tts-speak-done', listener);
+      return () => ipcRenderer.removeListener('tts-speak-done', listener);
+    },
+    onError: (callback) => {
+      const listener = (_event, data) => callback(data);
+      ipcRenderer.on('tts-error', listener);
+      return () => ipcRenderer.removeListener('tts-error', listener);
+    },
+  },
+
+  // Screen/camera capture
+  capture: {
+    getSources: () => ipcRenderer.invoke('capture-get-sources'),
+    selectSource: (sourceId) => ipcRenderer.invoke('capture-select-source', sourceId),
+    getScreenAccessStatus: () => ipcRenderer.invoke('capture-screen-access-status'),
+    openScreenSettings: () => ipcRenderer.invoke('capture-open-screen-settings'),
+    requestCameraPermission: () => ipcRenderer.invoke('capture-request-camera-permission'),
   },
 
   // --- Chat History Functions ---

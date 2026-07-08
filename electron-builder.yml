@@ -15,9 +15,6 @@ files:
   - "!{.env,.env.*,.npmrc,pnpm-lock.yaml}"
   - "!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}"
 
-extraMetadata:
-  main: dist/main/index.js
-
 # macOS Configuration
 mac:
   category: public.app-category.developer-tools
@@ -31,6 +28,7 @@ mac:
   extendInfo:
     NSRequiresAquaSystemAppearance: false
     NSMicrophoneUsageDescription: "Groq Desktop needs microphone access for speech-to-text functionality."
+    NSCameraUsageDescription: "Groq Desktop needs camera access to share your camera with the model."
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
 
@@ -97,3 +95,4 @@ asarUnpack:
   - "electron/scripts/*.sh"
   - "electron/scripts/*.cmd"
   - "electron/scripts/*.ps1"
+  - "electron/python/**"

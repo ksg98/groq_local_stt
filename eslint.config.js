@@ -41,9 +41,9 @@ module.exports = [
     }
   },
 
-  // 3. JSX specific config (React Components in Renderer)
+  // 3. Renderer config (React components, hooks, and browser-side libs)
   {
-    files: ["src/renderer/**/*.{jsx}"],
+    files: ["src/renderer/**/*.{js,jsx}"],
     plugins: {
         react: pluginReact
     },

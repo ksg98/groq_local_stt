@@ -1,4 +1,4 @@
-import { ArrowUp, Loader2, ImagePlus, Hammer, Upload, Zap, ZapOff, Square, Mic, MicOff, X } from "lucide-react";
+import { ArrowUp, Loader2, ImagePlus, Hammer, Upload, Zap, ZapOff, Square, Mic, MicOff, X, AudioLines, Monitor, Camera } from "lucide-react";
 import React, { useContext, useEffect, useRef, useState, useMemo, useCallback } from "react";
 import TextAreaAutosize from "react-textarea-autosize";
 import { SearchableSelect } from "./ui/SearchableSelect";
@@ -19,6 +19,8 @@ function ChatInput({
 	modelConfigs = {},
 	reasoningEffort = "medium",
 	onReasoningEffortChange,
+	voiceAgent = null,
+	capture = null,
 }) {
 	const [message, setMessage] = useState("");
 	const [suggestion, setSuggestion] = useState("");
@@ -100,6 +102,35 @@ function ChatInput({
 		onError: handleSpeechError,
 	});
 	
+
+	// Live preview of the active screenshare/camera stream
+	const capturePreviewRef = useRef(null);
+	useEffect(() => {
+		const video = capturePreviewRef.current;
+		if (video && capture?.mode) {
+			video.srcObject = capture.getPreviewStream?.() || null;
+			video.play?.().catch(() => {});
+		}
+	}, [capture?.mode]);
+
+	// Voice agent status pill styling per state
+	const AGENT_STATE_STYLES = {
+		starting: { label: 'Starting voice…', cls: 'bg-muted/40 border-border/50 text-muted-foreground', dot: 'bg-muted-foreground' },
+		listening: { label: 'Listening', cls: 'bg-green-500/10 border-green-500/30 text-green-700', dot: 'bg-green-500 animate-pulse' },
+		transcribing: { label: 'Transcribing…', cls: 'bg-amber-500/10 border-amber-500/30 text-amber-700', dot: 'bg-amber-500 animate-pulse' },
+		thinking: { label: 'Thinking…', cls: 'bg-amber-500/10 border-amber-500/30 text-amber-700', dot: 'bg-amber-500 animate-pulse' },
+		speaking: { label: 'Speaking', cls: 'bg-blue-500/10 border-blue-500/30 text-blue-700', dot: 'bg-blue-500 animate-pulse' },
+		error: { label: 'Voice error', cls: 'bg-red-500/10 border-red-500/30 text-red-600', dot: 'bg-red-500' },
+	};
+	const agentStateInfo = (() => {
+		if (!voiceAgent?.active) return null;
+		const state = voiceAgent.agentState;
+		const base = AGENT_STATE_STYLES[state] || AGENT_STATE_STYLES.starting;
+		if (state === 'starting' && voiceAgent.ttsStatus?.state === 'loading') {
+			return { ...base, label: 'Loading voice model…' };
+		}
+		return base;
+	})();
 
 	// Function to handle file selection (images and other files)
 	const handleFileChange = (e) => {
@@ -257,8 +288,9 @@ function ChatInput({
 			// Only handle space key
 			if (event.code !== 'Space') return;
 
-			// Don't trigger if already holding or recording
-			if (isSpaceHoldingRef.current || isRecording || isTranscribing || loading) return;
+			// Don't trigger if already holding or recording, or while the voice
+			// agent owns the microphone
+			if (isSpaceHoldingRef.current || isRecording || isTranscribing || loading || voiceAgent?.active) return;
 
 			// Check if we're focused on the textarea
 			const isTextareaFocused = document.activeElement === textareaRef.current;
@@ -321,7 +353,7 @@ function ChatInput({
 			window.removeEventListener('keydown', handleGlobalKeyDown);
 			window.removeEventListener('keyup', handleGlobalKeyUp);
 		};
-	}, [isRecording, isTranscribing, loading, startRecording, stopRecording, cancelRecording]);
+	}, [isRecording, isTranscribing, loading, startRecording, stopRecording, cancelRecording, voiceAgent?.active]);
 
 	const handleSubmit = (e) => {
 		e.preventDefault();
@@ -613,12 +645,103 @@ function ChatInput({
 								size="sm"
 								onClick={toggleRecording}
 								className="text-muted-foreground hover:text-foreground hover:bg-white/40 hover:shadow-sm transition-all duration-200 rounded-xl px-3 py-1.5"
-								title="Voice input (or hold Space)"
-								disabled={loading}
+								title={voiceAgent?.active ? "Voice input unavailable while the agent is listening" : "Voice input (or hold Space)"}
+								disabled={loading || voiceAgent?.active}
 							>
 								<Mic className="w-4 h-4 mr-2" />
 								Voice
 							</Button>
+						)}
+
+						{/* Voice Agent (local Kokoro TTS + VAD turn detection) */}
+						{voiceAgent?.supported && (
+							voiceAgent.active && agentStateInfo ? (
+								<div
+									className={cn("flex items-center gap-2 border rounded-xl px-3 py-1.5", agentStateInfo.cls)}
+									title={voiceAgent.ttsStatus?.detail || "Voice agent running"}
+								>
+									{voiceAgent.agentState === 'starting' ? (
+										<Loader2 className="w-3.5 h-3.5 animate-spin" />
+									) : (
+										<div className={cn("w-2 h-2 rounded-full", agentStateInfo.dot)} />
+									)}
+									<span className="text-sm font-medium">{agentStateInfo.label}</span>
+									<Button
+										type="button"
+										variant="ghost"
+										size="sm"
+										onClick={voiceAgent.stop}
+										className="p-1 h-6 w-6 hover:bg-black/10 rounded-lg"
+										title="Stop voice agent"
+									>
+										<X className="w-4 h-4" />
+									</Button>
+								</div>
+							) : (
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									onClick={voiceAgent.start}
+									className="text-muted-foreground hover:text-foreground hover:bg-white/40 hover:shadow-sm transition-all duration-200 rounded-xl px-3 py-1.5"
+									title="Start a voice conversation (local Kokoro TTS)"
+								>
+									<AudioLines className="w-4 h-4 mr-2" />
+									Agent
+								</Button>
+							)
+						)}
+
+						{/* Screenshare */}
+						{capture && (
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								onClick={capture.toggleScreenshare}
+								className={cn(
+									"transition-all duration-200 rounded-xl px-3 py-1.5",
+									capture.mode === 'screen'
+										? "bg-primary/15 text-primary hover:bg-primary/20"
+										: "text-muted-foreground hover:text-foreground hover:bg-white/40 hover:shadow-sm"
+								)}
+								title={!visionSupported ? "Screen share requires a vision-capable model" : capture.mode === 'screen' ? "Stop sharing screen" : "Share a screen or window with the model"}
+								disabled={!visionSupported}
+							>
+								<Monitor className="w-4 h-4" />
+							</Button>
+						)}
+
+						{/* Camera */}
+						{capture && (
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								onClick={capture.toggleCamera}
+								className={cn(
+									"transition-all duration-200 rounded-xl px-3 py-1.5",
+									capture.mode === 'camera'
+										? "bg-primary/15 text-primary hover:bg-primary/20"
+										: "text-muted-foreground hover:text-foreground hover:bg-white/40 hover:shadow-sm"
+								)}
+								title={!visionSupported ? "Camera requires a vision-capable model" : capture.mode === 'camera' ? "Turn camera off" : "Share your camera with the model"}
+								disabled={!visionSupported}
+							>
+								<Camera className="w-4 h-4" />
+							</Button>
+						)}
+
+						{/* Live capture preview */}
+						{capture?.mode && (
+							<video
+								ref={capturePreviewRef}
+								muted
+								playsInline
+								autoPlay
+								className="h-8 w-14 rounded-md object-cover border border-border/50 bg-black/80"
+								title={capture.mode === 'screen' ? "Sharing screen — a frame is attached to each message" : "Camera on — a frame is attached to each message"}
+							/>
 						)}
 					</div>
 

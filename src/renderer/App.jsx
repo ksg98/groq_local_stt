@@ -5,7 +5,10 @@ import ChatInput from './components/ChatInput';
 import ToolsPanel from './components/ToolsPanel';
 import ToolApprovalModal from './components/ToolApprovalModal';
 import ChatHistorySidebar from './components/ChatHistorySidebar';
+import ScreenSourcePicker from './components/ScreenSourcePicker';
 import { useChat } from './context/ChatContext'; // Import useChat hook
+import { useVoiceAgent } from './hooks/useVoiceAgent';
+import { useMediaCapture } from './hooks/useMediaCapture';
 // Import shared model definitions - REMOVED
 // import { MODEL_CONTEXT_SIZES } from '../../shared/models';
 import { Settings, Zap, MessageSquare, PanelLeftClose, PanelLeft, Radio, MessagesSquare } from 'lucide-react';
@@ -117,6 +120,13 @@ function App() {
   const cancelledRef = useRef(false); // Track if current operation is cancelled
   const loadingRef = useRef(false); // Track loading state for cleanup
   // --- End Cancellation State ---
+
+  // --- Voice Agent / Capture refs ---
+  // Populated after the hooks are instantiated (they need handleSendMessage);
+  // the streaming callbacks in executeChatTurn read them through these refs.
+  const voiceAgentRef = useRef(null);
+  const captureRef = useRef(null);
+  // --- End Voice Agent / Capture refs ---
 
   const handleRemoveLastMessage = () => {
     setMessages(prev => {
@@ -795,7 +805,9 @@ function App() {
 
         streamHandler.onContent(({ content }) => {
             finalAssistantData.content += content;
-            
+            // Voice agent: speak completed sentences as they stream in
+            voiceAgentRef.current?.feedAssistantDelta(content);
+
             // If this is the first content token and we have reasoning, mark reasoning as complete
             if (finalAssistantData.content === content && finalAssistantData.reasoningStartTime && !finalAssistantData.reasoningDuration) {
                 finalAssistantData.reasoningDuration = Math.round((Date.now() - finalAssistantData.reasoningStartTime) / 1000);
@@ -994,12 +1006,15 @@ function App() {
                     }
                     return newMessages;
                 });
+                // Voice agent: speak any trailing partial sentence of this turn
+                voiceAgentRef.current?.flushAssistantTurn();
                 resolve();
             });
 
             streamHandler.onError(({ error }) => {
                 console.error('Stream error received:', error);
                 console.log('Error details:', { error });
+                voiceAgentRef.current?.cancelSpeech();
                 // Replace placeholder with error
                 setMessages(prev => {
                     const newMessages = [...prev];
@@ -1017,6 +1032,7 @@ function App() {
 
             streamHandler.onCancelled(() => {
                 console.log('Stream was cancelled by user');
+                voiceAgentRef.current?.cancelSpeech();
                 // Remove the streaming placeholder or mark it as cancelled
                 setMessages(prev => {
                     const newMessages = [...prev];
@@ -1188,6 +1204,17 @@ function App() {
 
     if (!hasContent) return;
 
+    // Attach the current screenshare/camera frame while capture is active
+    // (vision-capable models only)
+    if (captureRef.current?.mode && visionSupported) {
+      const frame = captureRef.current.captureFrame();
+      if (frame) {
+        const parts = isStructuredContent ? [...content] : [{ type: 'text', text: content }];
+        parts.push({ type: 'image_url', image_url: { url: frame } });
+        content = parts;
+      }
+    }
+
     // If no current chat exists, create one first with current API mode
     if (!currentChatId) {
       await createNewChat(selectedModel, useResponsesApi);
@@ -1327,6 +1354,21 @@ function App() {
         }
     }
   };
+
+  // --- Voice agent (Kokoro TTS + Silero VAD) and screenshare/camera capture ---
+  const capture = useMediaCapture({
+    onError: (message) => console.error('[Capture]', message),
+  });
+  captureRef.current = capture;
+
+  const voiceAgent = useVoiceAgent({
+    onTranscript: (text) => handleSendMessage(text),
+    onStopGeneration: handleStopGeneration,
+    loadingRef,
+    onError: (message) => console.error('[VoiceAgent]', message),
+  });
+  voiceAgentRef.current = voiceAgent;
+  // --- End voice agent / capture ---
 
   // --- Placeholder for resuming chat after modal interaction ---
   const resumeChatFlow = async (handledToolResponse) => {
@@ -1865,6 +1907,8 @@ function App() {
                     modelConfigs={modelConfigs}
                     reasoningEffort={reasoningEffort}
                     onReasoningEffortChange={setReasoningEffort}
+                    voiceAgent={voiceAgent}
+                    capture={capture}
                   />
                 </div>
               </div>
@@ -1900,6 +1944,8 @@ function App() {
                     modelConfigs={modelConfigs}
                     reasoningEffort={reasoningEffort}
                     onReasoningEffortChange={setReasoningEffort}
+                    voiceAgent={voiceAgent}
+                    capture={capture}
                   />
                 </div>
               </div>
@@ -1923,6 +1969,14 @@ function App() {
         <ToolApprovalModal
           toolCall={pendingApprovalCall}
                     onApprove={handleToolApproval}
+        />
+      )}
+
+      {capture.pickerOpen && (
+        <ScreenSourcePicker
+          sources={capture.sources}
+          onSelect={capture.startScreenshare}
+          onClose={() => capture.setPickerOpen(false)}
         />
       )}
       </div>

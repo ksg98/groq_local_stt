@@ -1,4 +1,5 @@
 const Groq = require('groq-sdk');
+const { systemPreferences, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -42,9 +43,11 @@ async function transcribeAudio(audioBuffer, apiKey, options = {}) {
     const header = audioBuffer.slice(0, 12).toString('hex');
     console.log('[SpeechToText] Audio header (hex):', header);
 
-    // Create a temporary file for the audio - use .webm extension
+    // Create a temporary file for the audio. Recordings from MediaRecorder are
+    // webm/opus; the voice agent sends raw 16kHz WAV instead.
+    const ext = options.format === 'wav' ? 'wav' : 'webm';
     const tempDir = os.tmpdir();
-    const tempFilePath = path.join(tempDir, `groq-stt-${Date.now()}.webm`);
+    const tempFilePath = path.join(tempDir, `groq-stt-${Date.now()}.${ext}`);
 
     // Write the buffer to a temporary file
     fs.writeFileSync(tempFilePath, audioBuffer);
@@ -56,8 +59,8 @@ async function transcribeAudio(audioBuffer, apiKey, options = {}) {
     try {
       // Use Groq SDK's toFile helper for proper file creation
       const { toFile } = require('groq-sdk');
-      const audioFile = await toFile(fs.createReadStream(tempFilePath), 'recording.webm', {
-        type: 'audio/webm',
+      const audioFile = await toFile(fs.createReadStream(tempFilePath), `recording.${ext}`, {
+        type: ext === 'wav' ? 'audio/wav' : 'audio/webm',
       });
 
       console.log('[SpeechToText] File object created for API');
@@ -124,6 +127,34 @@ function initializeSpeechToTextHandlers(ipcMain, loadSettings) {
     const audioBuffer = Buffer.isBuffer(audioData) ? audioData : Buffer.from(audioData);
 
     return transcribeAudio(audioBuffer, settings.GROQ_API_KEY, options);
+  });
+
+  // Microphone permission (macOS). In dev mode the app runs as the generic
+  // Electron binary, so system-level mic access must be requested explicitly —
+  // otherwise getUserMedia can succeed but deliver a silent stream.
+  ipcMain.handle('speech-to-text-mic-permission-status', () => {
+    if (process.platform !== 'darwin') return 'granted';
+    return systemPreferences.getMediaAccessStatus('microphone');
+  });
+
+  ipcMain.handle('speech-to-text-request-mic-permission', async () => {
+    if (process.platform !== 'darwin') return true;
+    const status = systemPreferences.getMediaAccessStatus('microphone');
+    console.log('[SpeechToText] Microphone access status:', status);
+    if (status === 'granted') return true;
+    if (status === 'not-determined') {
+      const granted = await systemPreferences.askForMediaAccess('microphone');
+      console.log('[SpeechToText] Microphone access', granted ? 'granted' : 'denied', 'by user');
+      return granted;
+    }
+    // 'denied' or 'restricted' — must be enabled in System Settings
+    return false;
+  });
+
+  ipcMain.handle('speech-to-text-open-mic-settings', () => {
+    if (process.platform === 'darwin') {
+      return shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone');
+    }
   });
 
   console.log('[SpeechToText] IPC handlers initialized');

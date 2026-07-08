@@ -80,6 +80,19 @@ export function useSpeechToText({ onTranscription, onError }) {
       setIsPushToTalk(pushToTalk);
       isCancelledRef.current = false; // Reset cancel flag
 
+      // Ask macOS for system-level mic access first — in dev mode getUserMedia
+      // can succeed while the OS silently blocks capture (silent stream)
+      if (window.electron?.speechToText?.requestMicPermission) {
+        const granted = await window.electron.speechToText.requestMicPermission();
+        if (!granted) {
+          const msg = 'Microphone access is blocked. Enable it for this app in System Settings > Privacy & Security > Microphone, then try again.';
+          setError(msg);
+          onError?.(msg);
+          window.electron.speechToText.openMicSettings?.();
+          return;
+        }
+      }
+
       // Request microphone access with high quality settings
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
