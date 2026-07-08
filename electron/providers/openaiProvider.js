@@ -1,5 +1,6 @@
 const OpenAI = require('openai');
 const chatgptAuthManager = require('../chatgptAuthManager');
+const { CHATGPT_MODEL_PREFIX } = require('../../shared/providerModels');
 
 // ChatGPT subscription transport: Responses API served from the ChatGPT
 // backend (Codex endpoint). api.openai.com rejects ChatGPT OAuth tokens.
@@ -155,11 +156,15 @@ async function handleStream(
       summaryInterval: null,
     });
 
-    // Signed in with ChatGPT -> subscription auth via the ChatGPT backend;
-    // otherwise the classic OpenAI API key path.
-    const useChatGpt = chatgptAuthManager.isSignedIn(settings);
+    // 'chatgpt:*' models use the subscription auth via the ChatGPT backend;
+    // everything else uses the classic OpenAI API key path. Both can coexist.
+    const useChatGpt = model.startsWith(CHATGPT_MODEL_PREFIX);
+    const apiModel = useChatGpt ? model.slice(CHATGPT_MODEL_PREFIX.length) : model;
     let client;
     if (useChatGpt) {
+      if (!chatgptAuthManager.isSignedIn(settings)) {
+        throw new Error('This model requires signing in with ChatGPT (Settings > ChatGPT).');
+      }
       const { token, accountId } = await chatgptAuthManager.getValidAccessToken(settings);
       client = new OpenAI({
         apiKey: token,
@@ -192,9 +197,9 @@ async function handleStream(
       instructions += `\n\n${extractedInstructions}`;
     }
 
-    // Build API params for Responses API
+    // Build API params for Responses API (model id without the chatgpt: prefix)
     const apiParams = {
-      model: model,
+      model: apiModel,
       stream: true,
       input: input,
       instructions: instructions,

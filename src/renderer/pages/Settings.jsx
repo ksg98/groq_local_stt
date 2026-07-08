@@ -1423,8 +1423,8 @@ function Settings() {
                   )}
                   <p className="text-xs text-muted-foreground">
                     {chatgptAuthStatus?.signedIn
-                      ? 'GPT models now use your ChatGPT subscription — the API key below is ignored.'
-                      : 'Uses your ChatGPT Plus/Pro subscription for GPT models instead of a pay-per-token API key.'}
+                      ? 'Subscription models are marked "(ChatGPT)" in the model picker; API-key models keep working alongside them.'
+                      : 'Adds GPT models billed to your ChatGPT Plus/Pro subscription — works alongside the API key.'}
                   </p>
                 </div>
 
