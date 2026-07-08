@@ -7,7 +7,7 @@ function createWindow(screen, BrowserWindow) {
   const { height, width } = display.workAreaSize;
   const bounds = display.bounds;
 
-  const windowWidth = Math.min(1600, width);
+  const windowWidth = width;
   const windowHeight = height;
 
   // Calculate center position
@@ -20,7 +20,6 @@ function createWindow(screen, BrowserWindow) {
     height: windowHeight,
     x: x,
     y: y,
-    maxWidth: 1600,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,

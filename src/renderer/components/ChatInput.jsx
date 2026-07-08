@@ -576,8 +576,8 @@ function ChatInput({
 				</div>
 
 				{/* Bottom Controls */}
-				<div className="flex items-center justify-between px-2">
-					<div className="flex items-center gap-2">
+				<div className="flex flex-wrap items-center justify-between gap-y-2 px-2">
+					<div className="flex flex-wrap items-center gap-2">
 						{/* File Upload Button */}
 						{files.length < 5 && (
 							<Button
@@ -787,7 +787,7 @@ function ChatInput({
 						)}
 					</div>
 
-					<div className="flex items-center gap-3">
+					<div className="flex flex-wrap items-center gap-3">
 						{/* Autocomplete hint */}
 						{autocompleteEnabled && suggestion && !loading && (
 							<div className="text-xs text-muted-foreground flex items-center gap-1">
