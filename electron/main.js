@@ -48,6 +48,7 @@ const mcpManager = require('./mcpManager');
 const { initializeWindowManager } = require('./windowManager');
 const authManager = require('./authManager');
 const googleOAuthManager = require('./googleOAuthManager');
+const chatgptAuthManager = require('./chatgptAuthManager');
 
 // Import context capture system
 const ContextCapture = require('./contextCapture');
@@ -351,6 +352,12 @@ app.whenReady().then(async () => {
   // Initialize Google OAuth Manager
   console.log("[Main Init] Initializing Google OAuth Manager...");
   googleOAuthManager.initialize(app, saveSettings);
+
+  // Initialize ChatGPT (subscription) OAuth Manager
+  chatgptAuthManager.initialize(saveSettings, loadSettings);
+  ipcMain.handle('chatgpt-auth-start', async () => chatgptAuthManager.startLogin());
+  ipcMain.handle('chatgpt-auth-status', async () => chatgptAuthManager.getStatus(loadSettings()));
+  ipcMain.handle('chatgpt-auth-signout', async () => chatgptAuthManager.signOut());
 
   // --- Google OAuth IPC Handlers --- //
   ipcMain.handle('google-oauth-refresh', async () => {

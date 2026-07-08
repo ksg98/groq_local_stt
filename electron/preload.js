@@ -143,6 +143,13 @@ contextBridge.exposeInMainWorld('electron', {
     validate: () => ipcRenderer.invoke('google-oauth-validate'),
   },
 
+  // ChatGPT subscription sign-in (OAuth, no API key)
+  chatgptAuth: {
+    start: () => ipcRenderer.invoke('chatgpt-auth-start'),
+    getStatus: () => ipcRenderer.invoke('chatgpt-auth-status'),
+    signOut: () => ipcRenderer.invoke('chatgpt-auth-signout'),
+  },
+
   // --- Context Sharing Functions (Legacy - for URL/CLI context) ---
   getPendingContext: () => ipcRenderer.invoke('get-pending-context'),
   clearContext: () => ipcRenderer.invoke('clear-context'),

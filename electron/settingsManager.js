@@ -37,7 +37,15 @@ function loadSettings() {
             googleRefreshToken: "",
             googleClientId: "",
             googleClientSecret: "",
-            googleTokenExpiresAt: null
+            googleTokenExpiresAt: null,
+            chatgptAccessToken: "",
+            chatgptRefreshToken: "",
+            chatgptIdToken: "",
+            chatgptTokenExpiresAt: 0,
+            chatgptLastRefreshAt: 0,
+            chatgptEmail: "",
+            chatgptAccountId: "",
+            chatgptPlanType: ""
         };
     }
     const userDataPath = appInstance.getPath('userData');
@@ -69,7 +77,15 @@ function loadSettings() {
         googleRefreshToken: "",
         googleClientId: "",
         googleClientSecret: "",
-        googleTokenExpiresAt: null
+        googleTokenExpiresAt: null,
+        chatgptAccessToken: "",
+        chatgptRefreshToken: "",
+        chatgptIdToken: "",
+        chatgptTokenExpiresAt: 0,
+        chatgptLastRefreshAt: 0,
+        chatgptEmail: "",
+        chatgptAccountId: "",
+        chatgptPlanType: ""
     };
 
     try {

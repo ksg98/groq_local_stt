@@ -72,6 +72,40 @@ const OPENAI_MODELS = {
   },
 };
 
+// Models served by the ChatGPT backend when signed in with a ChatGPT
+// subscription (OAuth) instead of an API key. The backend has no /v1/models,
+// so this list is static. Codex-only models 400 on API-key auth and vice
+// versa for some API-only models — keep the lists separate.
+const CHATGPT_MODELS = {
+  'gpt-5.4': {
+    displayName: 'GPT-5.4 (ChatGPT)',
+    context: 400000,
+    vision_supported: true,
+    builtin_tools_supported: false,
+    provider: 'openai',
+    max_tokens_default: 32768,
+    reasoning: { supported: true, mode: 'effort', efforts: ['none', 'low', 'medium', 'high', 'xhigh'] },
+  },
+  'gpt-5.4-codex': {
+    displayName: 'GPT-5.4 Codex (ChatGPT)',
+    context: 400000,
+    vision_supported: true,
+    builtin_tools_supported: false,
+    provider: 'openai',
+    max_tokens_default: 32768,
+    reasoning: { supported: true, mode: 'effort', efforts: ['low', 'medium', 'high', 'xhigh'] },
+  },
+  'gpt-5.3-codex': {
+    displayName: 'GPT-5.3 Codex (ChatGPT)',
+    context: 400000,
+    vision_supported: true,
+    builtin_tools_supported: false,
+    provider: 'openai',
+    max_tokens_default: 32768,
+    reasoning: { supported: true, mode: 'effort', efforts: ['low', 'medium', 'high', 'xhigh'] },
+  },
+};
+
 function isValidKey(key) {
   return (
     typeof key === 'string' &&
@@ -291,9 +325,14 @@ async function getCachedProviderModels(provider, apiKey, fetcher, staticFallback
  * definitions per provider when no key is configured or the fetch fails.
  */
 async function getProviderModels(settings = {}) {
+  // Signed in with a ChatGPT subscription: the ChatGPT backend serves a fixed
+  // model set and has no /v1/models endpoint — skip the API-key fetch.
+  const chatgptSignedIn = !!(settings.chatgptRefreshToken && settings.chatgptRefreshToken.trim());
   const [anthropic, openai] = await Promise.all([
     getCachedProviderModels('anthropic', settings.ANTHROPIC_API_KEY, fetchAnthropicModels, ANTHROPIC_MODELS),
-    getCachedProviderModels('openai', settings.OPENAI_API_KEY, fetchOpenAIModels, OPENAI_MODELS),
+    chatgptSignedIn
+      ? Promise.resolve(CHATGPT_MODELS)
+      : getCachedProviderModels('openai', settings.OPENAI_API_KEY, fetchOpenAIModels, OPENAI_MODELS),
   ]);
   return { ...anthropic, ...openai };
 }
@@ -305,6 +344,7 @@ async function getProviderModels(settings = {}) {
 function getProviderForModel(modelId, modelContextSizes) {
   if (ANTHROPIC_MODELS[modelId]) return 'anthropic';
   if (OPENAI_MODELS[modelId]) return 'openai';
+  if (CHATGPT_MODELS[modelId]) return 'openai';
 
   // Check if the model in modelContextSizes has a provider field
   const modelInfo = modelContextSizes && modelContextSizes[modelId];
@@ -316,6 +356,7 @@ function getProviderForModel(modelId, modelContextSizes) {
 module.exports = {
   ANTHROPIC_MODELS,
   OPENAI_MODELS,
+  CHATGPT_MODELS,
   getProviderModels,
   getProviderForModel,
 };

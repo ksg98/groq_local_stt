@@ -48,6 +48,8 @@ function Settings() {
     remoteMcpServers: {}
   });
   const [googleOAuthStatus, setGoogleOAuthStatus] = useState(null);
+  const [chatgptAuthStatus, setChatgptAuthStatus] = useState({ signedIn: false });
+  const [chatgptSigningIn, setChatgptSigningIn] = useState(false);
   const [isRefreshingToken, setIsRefreshingToken] = useState(false);
   const [saveStatus, setSaveStatus] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -173,6 +175,14 @@ function Settings() {
           setGoogleOAuthStatus(status);
         } catch (e) {
           console.error('Error fetching Google OAuth status:', e);
+        }
+
+        // Fetch ChatGPT subscription sign-in status
+        try {
+          const status = await window.electron.chatgptAuth.getStatus();
+          setChatgptAuthStatus(status || { signedIn: false });
+        } catch (e) {
+          console.error('Error fetching ChatGPT auth status:', e);
         }
       } catch (error) {
         console.error('Error loading settings:', error);
@@ -352,6 +362,54 @@ function Settings() {
       // Clear status after 3 seconds
       if (statusTimeoutRef.current) clearTimeout(statusTimeoutRef.current);
       statusTimeoutRef.current = setTimeout(() => setSaveStatus(null), 3000);
+    }
+  };
+
+  // Sync ChatGPT token fields written by the main process into local state —
+  // the Settings page saves the whole settings object, so stale local values
+  // would otherwise clobber freshly written tokens.
+  const syncChatgptTokenSettings = async () => {
+    try {
+      const fresh = await window.electron.getSettings();
+      const tokenKeys = [
+        'chatgptAccessToken', 'chatgptRefreshToken', 'chatgptIdToken',
+        'chatgptTokenExpiresAt', 'chatgptLastRefreshAt', 'chatgptEmail',
+        'chatgptAccountId', 'chatgptPlanType',
+      ];
+      setSettings(prev => {
+        const next = { ...prev };
+        tokenKeys.forEach(key => { next[key] = fresh[key]; });
+        return next;
+      });
+    } catch (e) {
+      console.error('Error syncing ChatGPT token settings:', e);
+    }
+  };
+
+  const handleChatgptSignIn = async () => {
+    setChatgptSigningIn(true);
+    try {
+      const result = await window.electron.chatgptAuth.start();
+      setChatgptAuthStatus({ signedIn: true, email: result.email, planType: result.planType });
+      await syncChatgptTokenSettings();
+      setSaveStatus({ type: 'success', message: `Signed in with ChatGPT${result.email ? ` as ${result.email}` : ''}` });
+    } catch (error) {
+      console.error('ChatGPT sign-in failed:', error);
+      setSaveStatus({ type: 'error', message: `ChatGPT sign-in failed: ${error.message}` });
+    } finally {
+      setChatgptSigningIn(false);
+      if (statusTimeoutRef.current) clearTimeout(statusTimeoutRef.current);
+      statusTimeoutRef.current = setTimeout(() => setSaveStatus(null), 5000);
+    }
+  };
+
+  const handleChatgptSignOut = async () => {
+    try {
+      await window.electron.chatgptAuth.signOut();
+      setChatgptAuthStatus({ signedIn: false });
+      await syncChatgptTokenSettings();
+    } catch (error) {
+      console.error('ChatGPT sign-out failed:', error);
     }
   };
 
@@ -1333,10 +1391,43 @@ function Settings() {
                   <span>ChatGPT (OpenAI)</span>
                 </CardTitle>
                 <CardDescription>
-                  Configure your OpenAI API key and GPT reasoning settings
+                  Sign in with your ChatGPT subscription (no API key needed) or configure an OpenAI API key
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                {/* ChatGPT subscription sign-in */}
+                <div className="space-y-2">
+                  <Label>ChatGPT Account</Label>
+                  {chatgptAuthStatus?.signedIn ? (
+                    <div className="flex items-center justify-between border border-green-500/30 bg-green-500/10 rounded-lg px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 bg-green-500 rounded-full" />
+                        <span className="text-sm font-medium">
+                          Signed in{chatgptAuthStatus.email ? ` as ${chatgptAuthStatus.email}` : ''}
+                          {chatgptAuthStatus.planType ? ` (${chatgptAuthStatus.planType})` : ''}
+                        </span>
+                      </div>
+                      <Button type="button" variant="outline" size="sm" onClick={handleChatgptSignOut}>
+                        Sign out
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleChatgptSignIn}
+                      disabled={chatgptSigningIn}
+                    >
+                      {chatgptSigningIn ? 'Waiting for browser…' : 'Sign in with ChatGPT'}
+                    </Button>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    {chatgptAuthStatus?.signedIn
+                      ? 'GPT models now use your ChatGPT subscription — the API key below is ignored.'
+                      : 'Uses your ChatGPT Plus/Pro subscription for GPT models instead of a pay-per-token API key.'}
+                  </p>
+                </div>
+
                 <div className="space-y-2">
                   <Label htmlFor="openai-api-key">OpenAI API Key</Label>
                   <div className="relative">

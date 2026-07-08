@@ -1,4 +1,13 @@
 const OpenAI = require('openai');
+const chatgptAuthManager = require('../chatgptAuthManager');
+
+// ChatGPT subscription transport: Responses API served from the ChatGPT
+// backend (Codex endpoint). api.openai.com rejects ChatGPT OAuth tokens.
+const CHATGPT_CODEX_BASE_URL = 'https://chatgpt.com/backend-api/codex';
+// Session-stable id: the backend keys prompt-cache and rate-limit buckets off it
+const CHATGPT_SESSION_ID = `groq-desktop-${Date.now().toString(36)}-${Math.random()
+  .toString(36)
+  .slice(2, 10)}`;
 
 function validateApiKey(settings) {
   if (!settings.OPENAI_API_KEY || settings.OPENAI_API_KEY.trim() === '') {
@@ -146,9 +155,26 @@ async function handleStream(
       summaryInterval: null,
     });
 
-    validateApiKey(settings);
-
-    const client = new OpenAI({ apiKey: settings.OPENAI_API_KEY });
+    // Signed in with ChatGPT -> subscription auth via the ChatGPT backend;
+    // otherwise the classic OpenAI API key path.
+    const useChatGpt = chatgptAuthManager.isSignedIn(settings);
+    let client;
+    if (useChatGpt) {
+      const { token, accountId } = await chatgptAuthManager.getValidAccessToken(settings);
+      client = new OpenAI({
+        apiKey: token,
+        baseURL: CHATGPT_CODEX_BASE_URL,
+        defaultHeaders: {
+          originator: 'codex_cli_rs',
+          'User-Agent': 'codex_cli_rs/0.136.0',
+          session_id: CHATGPT_SESSION_ID,
+          ...(accountId ? { 'chatgpt-account-id': accountId } : {}),
+        },
+      });
+    } else {
+      validateApiKey(settings);
+      client = new OpenAI({ apiKey: settings.OPENAI_API_KEY });
+    }
     const { instructions: extractedInstructions, input } = convertToResponsesInput(messages);
     const tools = convertTools(discoveredTools);
 
@@ -200,6 +226,14 @@ async function handleStream(
         effort: reasoningEffort,
         summary: 'auto',
       };
+    }
+
+    if (useChatGpt) {
+      // Stable key keeps the backend prompt cache warm across turns
+      apiParams.prompt_cache_key = CHATGPT_SESSION_ID;
+      if (reasoningEffort !== 'none') {
+        apiParams.include = ['reasoning.encrypted_content'];
+      }
     }
 
     console.log(
