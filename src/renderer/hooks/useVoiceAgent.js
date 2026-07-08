@@ -26,8 +26,12 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
   const [active, setActive] = useState(false);
   const [agentState, setAgentState] = useState('idle'); // idle|starting|listening|transcribing|thinking|speaking|error
   const [ttsStatus, setTtsStatus] = useState(null);
+  // Muted = voice input only: transcripts still auto-send, replies stay text
+  const [muted, setMuted] = useState(() => localStorage.getItem('voice_agent_muted') === 'true');
 
   const activeRef = useRef(false);
+  const mutedRef = useRef(muted);
+  const ttsStartedRef = useRef(false);
   const vadRef = useRef(null);
   const playerRef = useRef(null);
   const chunkerRef = useRef(null);
@@ -85,7 +89,7 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
     if (errorRef.current) return 'error';
     if (speakingRef.current) return 'speaking';
     if (transcribingRef.current) return 'transcribing';
-    if (!ttsReadyRef.current) return 'starting';
+    if (!ttsReadyRef.current && !mutedRef.current) return 'starting';
     if (loadingRef.current) return 'thinking';
     return 'listening';
   }, [loadingRef]);
@@ -185,6 +189,7 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
     transcribingRef.current = false;
     errorRef.current = false;
     ttsReadyRef.current = false;
+    ttsStartedRef.current = false;
     setTtsStatus(null);
     setAgentState('idle');
     // Keep the sidecar warm across toggles; it is killed on app quit.
@@ -235,9 +240,13 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
         })
       );
 
-      const startResult = await window.electron.tts.start();
-      if (startResult && startResult.ok === false) {
-        throw new Error(startResult.error || 'Failed to start Kokoro TTS');
+      // Muted mode skips the sidecar entirely — no model load, no RAM
+      if (!mutedRef.current) {
+        const startResult = await window.electron.tts.start();
+        if (startResult && startResult.ok === false) {
+          throw new Error(startResult.error || 'Failed to start Kokoro TTS');
+        }
+        ttsStartedRef.current = true;
       }
 
       vadRef.current = await MicVAD.new({
@@ -288,12 +297,36 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
   }, [start, stop]);
 
   const speakSentence = useCallback((text) => {
-    if (!text || !activeRef.current) return;
+    if (!text || !activeRef.current || mutedRef.current) return;
     const id = ++speakSeqRef.current;
     window.electron.tts
       .speak({ id, text, voice: DEFAULT_VOICE, speed: DEFAULT_SPEED })
       .catch(() => {});
   }, []);
+
+  // Text-only mode toggle: muting silences immediately; unmuting mid-session
+  // lazily starts the sidecar if this session began muted.
+  const toggleMute = useCallback(() => {
+    const next = !mutedRef.current;
+    mutedRef.current = next;
+    setMuted(next);
+    localStorage.setItem('voice_agent_muted', String(next));
+    if (next) {
+      discardBelowRef.current = speakSeqRef.current + 1;
+      chunkerRef.current?.reset();
+      playerRef.current?.stopAll();
+      window.electron.tts?.cancel().catch(() => {});
+    } else if (activeRef.current && !ttsStartedRef.current) {
+      window.electron.tts
+        .start()
+        .then(() => {
+          ttsStartedRef.current = true;
+        })
+        .catch(() => {});
+      ttsStartedRef.current = true;
+    }
+    refreshState();
+  }, [refreshState]);
 
   // Called with every streamed content delta from the assistant
   const feedAssistantDelta = useCallback(
@@ -333,6 +366,8 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
     active,
     agentState,
     ttsStatus,
+    muted,
+    toggleMute,
     sidecarState,
     sidecarLoaded: sidecarState === 'ready',
     sidecarLoading: sidecarState === 'starting' || sidecarState === 'loading',

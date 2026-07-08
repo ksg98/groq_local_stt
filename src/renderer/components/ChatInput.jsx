@@ -1,4 +1,4 @@
-import { ArrowUp, Loader2, ImagePlus, Hammer, Upload, Zap, ZapOff, Square, Mic, MicOff, X, AudioLines, Monitor, Camera } from "lucide-react";
+import { ArrowUp, Loader2, ImagePlus, Hammer, Upload, Zap, ZapOff, Square, Mic, MicOff, X, AudioLines, Monitor, Camera, Volume2, VolumeX } from "lucide-react";
 import React, { useContext, useEffect, useRef, useState, useMemo, useCallback } from "react";
 import TextAreaAutosize from "react-textarea-autosize";
 import { SearchableSelect } from "./ui/SearchableSelect";
@@ -665,7 +665,17 @@ function ChatInput({
 									) : (
 										<div className={cn("w-2 h-2 rounded-full", agentStateInfo.dot)} />
 									)}
-									<span className="text-sm font-medium">{agentStateInfo.label}</span>
+									<span className="text-sm font-medium">{agentStateInfo.label}{voiceAgent.muted ? ' · muted' : ''}</span>
+									<Button
+										type="button"
+										variant="ghost"
+										size="sm"
+										onClick={voiceAgent.toggleMute}
+										className="p-1 h-6 w-6 hover:bg-black/10 rounded-lg"
+										title={voiceAgent.muted ? "Unmute — speak replies aloud" : "Mute — replies stay text-only"}
+									>
+										{voiceAgent.muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+									</Button>
 									<Button
 										type="button"
 										variant="ghost"
