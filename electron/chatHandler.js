@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { pruneMessageHistory } = require('./messageUtils');
 const { supportsBuiltInTools } = require('../shared/models');
+const { LOCAL_MODEL_PREFIX } = require('../shared/providerModels');
 const googleOAuthManager = require('./googleOAuthManager');
 const { routeToProvider } = require('./providers/providerRouter');
 
@@ -1501,8 +1502,9 @@ async function handleChatStream(event, messages, model, settings, modelContextSi
     );
     if (handled) return;
 
-    // Check if Responses API should be used
-    if (settings.useResponsesApi) {
+    // Check if Responses API should be used (local servers only speak chat
+    // completions, so local: models always take the standard path)
+    if (settings.useResponsesApi && !(typeof model === 'string' && model.startsWith(LOCAL_MODEL_PREFIX))) {
         return handleResponsesApiStream(event, messages, model, settings, modelContextSizes, discoveredTools);
     }
 
@@ -1521,10 +1523,15 @@ async function handleChatStream(event, messages, model, settings, modelContextSi
             summaryInterval: null
         });
 
-        validateApiKey(settings);
+        // 'local:*' models come from the local OpenAI-compatible server slot —
+        // same chat-completions transport, its own base URL, no Groq key needed.
+        const isLocalModel = typeof model === 'string' && model.startsWith(LOCAL_MODEL_PREFIX);
+        if (!isLocalModel) {
+            validateApiKey(settings);
+        }
         const { modelToUse, modelInfo } = determineModel(model, settings, modelContextSizes);
         const visionCheckPassed = checkVisionSupport(messages, modelInfo, modelToUse, event);
-        
+
         // If vision check failed, return early
         if (!visionCheckPassed) {
             cleanupStream(streamId);
@@ -1532,17 +1539,24 @@ async function handleChatStream(event, messages, model, settings, modelContextSi
         }
 
         const groqConfig = { apiKey: settings.GROQ_API_KEY };
-        
-        // Use custom API base URL if enabled and provided (use exactly as provided)
-        if (settings.customApiBaseUrlEnabled && settings.customApiBaseUrl && settings.customApiBaseUrl.trim()) {
+
+        if (isLocalModel) {
+            const localBaseUrl = (settings.localLlmBaseUrl || '').trim();
+            if (!settings.localLlmEnabled || !localBaseUrl) {
+                throw new Error('Local model server is not enabled. Configure it in Settings > Local Model Server.');
+            }
+            groqConfig.apiKey = (settings.localLlmApiKey || '').trim() || 'local';
+            groqConfig.baseURL = localBaseUrl;
+        } else if (settings.customApiBaseUrlEnabled && settings.customApiBaseUrl && settings.customApiBaseUrl.trim()) {
+            // Use custom API base URL if enabled and provided (use exactly as provided)
             groqConfig.baseURL = settings.customApiBaseUrl.trim();
         }
-        
+
         const groq = new Groq(groqConfig);
-        
-        // Monkey patch the SDK when using custom baseURL
-        // Custom baseURL should end with /v1/ (e.g., http://example.com/v1/ or https://api.groq.com/openai/v1/)
-        if (settings.customApiBaseUrlEnabled && settings.customApiBaseUrl && settings.customApiBaseUrl.trim()) {
+
+        // Monkey patch the SDK when using a non-Groq baseURL
+        // The baseURL should end with /v1/ (e.g., http://example.com/v1/ or https://api.groq.com/openai/v1/)
+        if (groqConfig.baseURL) {
             const originalPost = groq.post.bind(groq);
             const originalBuildURL = groq.buildURL.bind(groq);
             
@@ -1564,6 +1578,10 @@ async function handleChatStream(event, messages, model, settings, modelContextSi
         const cleanedMessages = cleanMessages(messages);
         const prunedMessages = pruneMessageHistory(cleanedMessages, modelToUse, modelContextSizes);
         const chatCompletionParams = buildApiParams(prunedMessages, modelToUse, settings, tools, modelContextSizes);
+        if (isLocalModel) {
+            // The server knows the model by its raw id, without our namespace
+            chatCompletionParams.model = modelToUse.slice(LOCAL_MODEL_PREFIX.length);
+        }
 
         await executeStreamWithRetry(groq, chatCompletionParams, event, streamId, settings);
     } catch (outerError) {

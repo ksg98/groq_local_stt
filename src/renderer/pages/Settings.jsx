@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Eye, EyeOff, Plus, Trash2, Edit3, Save, X, RefreshCw, Key, Settings as SettingsIcon, Zap, Cpu, Server, AlertCircle, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Plus, Trash2, Edit3, Save, X, RefreshCw, Key, Settings as SettingsIcon, Zap, Cpu, Server, AlertCircle, CheckCircle, Mic, Volume2 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -9,6 +9,64 @@ import { Textarea } from '../components/ui/textarea';
 import { Badge } from '../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import Switch from '../components/ui/Switch';
+
+// Make sure the saved model is always selectable, even when the live list
+// hasn't loaded yet or no longer contains it.
+function withCurrent(list, current) {
+  const arr = Array.isArray(list) ? [...list] : [];
+  if (current && !arr.includes(current)) arr.unshift(current);
+  return arr;
+}
+
+function formatBytes(n) {
+  if (!n) return '';
+  return n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`;
+}
+
+// RAM status + load/unload row for a local model sidecar (Kokoro / Whisper)
+function SidecarStatusRow({ status, onLoad, onUnload }) {
+  const state = status?.state || 'stopped';
+  if (state === 'ready') {
+    return (
+      <div className="flex items-center justify-between border border-green-500/30 bg-green-500/10 rounded-lg px-3 py-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-2 h-2 bg-green-500 rounded-full shrink-0" />
+          <span className="text-sm font-medium truncate">
+            Loaded in RAM{status?.model ? ` — ${status.model.replace('mlx-community/', '')}` : ''}
+          </span>
+        </div>
+        <Button type="button" variant="outline" size="sm" onClick={onUnload}>
+          Unload
+        </Button>
+      </div>
+    );
+  }
+  if (state === 'starting' || state === 'loading') {
+    return (
+      <div className="flex items-center justify-between gap-2 border border-border/50 bg-muted/40 rounded-lg px-3 py-2 text-muted-foreground">
+        <div className="flex items-center gap-2 min-w-0">
+          <RefreshCw className="h-3.5 w-3.5 animate-spin shrink-0" />
+          <span className="text-sm truncate">
+            {status?.detail || 'Loading model… (first load downloads it from HuggingFace)'}
+          </span>
+        </div>
+        <Button type="button" variant="outline" size="sm" onClick={onUnload} title="Stop loading — a partial download resumes next time">
+          Cancel
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center justify-between border border-border/50 rounded-lg px-3 py-2">
+      <span className={`text-sm truncate ${state === 'error' ? 'text-red-500' : 'text-muted-foreground'}`}>
+        {state === 'error' ? status?.message || 'Failed to load' : 'Not loaded'}
+      </span>
+      <Button type="button" variant="outline" size="sm" onClick={onLoad}>
+        Load
+      </Button>
+    </div>
+  );
+}
 
 function Settings() {
   const [settings, setSettings] = useState({
@@ -48,6 +106,10 @@ function Settings() {
     remoteMcpServers: {}
   });
   const [googleOAuthStatus, setGoogleOAuthStatus] = useState(null);
+  const [audioModels, setAudioModels] = useState(null);
+  const [kokoroStatus, setKokoroStatus] = useState({ state: 'stopped' });
+  const [whisperStatus, setWhisperStatus] = useState({ state: 'stopped' });
+  const [localModelInfo, setLocalModelInfo] = useState(null);
   const [chatgptAuthStatus, setChatgptAuthStatus] = useState({ signedIn: false });
   const [chatgptSigningIn, setChatgptSigningIn] = useState(false);
   const [isRefreshingToken, setIsRefreshingToken] = useState(false);
@@ -108,6 +170,38 @@ function Settings() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [navigate]);
+
+  // STT/TTS model catalogs (fetched live per provider) + sidecar RAM states
+  useEffect(() => {
+    let disposed = false;
+    window.electron.getAudioModels?.()
+      .then((models) => {
+        if (!disposed) setAudioModels(models);
+      })
+      .catch((e) => console.error('Error fetching audio models:', e));
+    window.electron.tts?.getState?.()
+      .then((s) => {
+        if (!disposed && s) setKokoroStatus({ state: s.running ? s.state : 'stopped' });
+      })
+      .catch(() => {});
+    window.electron.sttLocal?.getState?.()
+      .then((s) => {
+        if (!disposed && s) setWhisperStatus({ state: s.running ? s.state : 'stopped', model: s.model });
+      })
+      .catch(() => {});
+    const unsubTts = window.electron.tts?.onStatus?.((status) => {
+      // The shared tts-status channel also reports the OpenAI engine; the
+      // pill here only tracks the Kokoro sidecar (what sits in RAM).
+      if (status?.engine === 'openai') return;
+      setKokoroStatus(status);
+    }) || (() => {});
+    const unsubStt = window.electron.sttLocal?.onStatus?.((status) => setWhisperStatus(status)) || (() => {});
+    return () => {
+      disposed = true;
+      unsubTts();
+      unsubStt();
+    };
+  }, []);
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -297,6 +391,65 @@ function Settings() {
     const updatedSettings = { ...settings, [name]: checked };
     setSettings(updatedSettings);
     saveSettings(updatedSettings);
+  };
+
+  // Voice (STT/TTS) derived state + sidecar controls
+  const sttProvider = settings.sttProvider || 'groq';
+  const sttModelKey =
+    sttProvider === 'openai' ? 'sttModelOpenai' : sttProvider === 'local' ? 'sttModelLocal' : 'sttModelGroq';
+  const sttModelOptions = withCurrent(audioModels?.stt?.[sttProvider], settings[sttModelKey]);
+  const ttsProvider = settings.ttsProvider || 'kokoro';
+  const ttsModelOptions = withCurrent(audioModels?.tts?.openai, settings.ttsOpenaiModel);
+  const ttsVoiceOptions = withCurrent(audioModels?.tts?.voices, settings.ttsOpenaiVoice);
+  const openaiKeySet = !!(
+    settings.OPENAI_API_KEY &&
+    settings.OPENAI_API_KEY.trim() &&
+    !settings.OPENAI_API_KEY.includes('<replace me>')
+  );
+
+  const handleKokoroLoad = () => (window.electron.tts.loadKokoro || window.electron.tts.start)().catch(() => {});
+  const handleKokoroUnload = () => window.electron.tts.stop().catch(() => {});
+  const handleWhisperLoad = async () => {
+    // Flush the debounced save first so the sidecar picks up a just-changed model
+    try {
+      await window.electron.saveSettings({ ...settings, disabledMcpServers: settings.disabledMcpServers || [] });
+    } catch { /* best effort */ }
+    window.electron.sttLocal.start().catch(() => {});
+  };
+  const handleWhisperUnload = () => window.electron.sttLocal.stop().catch(() => {});
+
+  const refreshAudioModels = () =>
+    window.electron.getAudioModels?.().then(setAudioModels).catch(() => {});
+
+  // Size (live from HuggingFace) + on-disk state for the selected local model
+  useEffect(() => {
+    if (sttProvider !== 'local' || !settings.sttModelLocal) {
+      setLocalModelInfo(null);
+      return undefined;
+    }
+    let stale = false;
+    setLocalModelInfo(null);
+    window.electron.getLocalModelInfo?.(settings.sttModelLocal)
+      .then((info) => {
+        if (!stale) setLocalModelInfo(info);
+      })
+      .catch(() => {});
+    return () => {
+      stale = true;
+    };
+  }, [sttProvider, settings.sttModelLocal, whisperStatus.state]);
+
+  const handleDeleteLocalModel = async (modelId) => {
+    if (!modelId) return;
+    if (!window.confirm(`Delete ${modelId} from disk? It will re-download the next time it loads.`)) return;
+    const result = await window.electron.deleteLocalModel?.(modelId);
+    if (result && result.ok === false) {
+      setSaveStatus({ type: 'error', message: `Delete failed: ${result.error}` });
+    }
+    refreshAudioModels();
+    if (modelId === settings.sttModelLocal) {
+      window.electron.getLocalModelInfo?.(modelId).then(setLocalModelInfo).catch(() => {});
+    }
   };
 
   const handleBuiltInToolToggle = (toolName, checked) => {
@@ -1318,6 +1471,68 @@ function Settings() {
               </CardContent>
             </Card>
 
+            {/* Local Model Server (its own slot — works alongside Groq) */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <Server className="h-5 w-5 text-primary" />
+                  <span>Local Model Server</span>
+                </CardTitle>
+                <CardDescription>
+                  Serve models from your own machine (LM Studio, Ollama, mlx_lm.server, llama.cpp) alongside Groq — they show up in the model picker marked (Local)
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="local-llm-base-url">Base URL</Label>
+                    <div className="flex items-center space-x-2">
+                      <Label htmlFor="local-llm-enabled" className="text-sm font-normal text-muted-foreground">
+                        {settings.localLlmEnabled ? 'Enabled' : 'Disabled'}
+                      </Label>
+                      <Switch
+                        id="local-llm-enabled"
+                        checked={settings.localLlmEnabled || false}
+                        onChange={(e) => handleToggleChange('localLlmEnabled', e.target.checked)}
+                      />
+                    </div>
+                  </div>
+                  <Input
+                    type="text"
+                    id="local-llm-base-url"
+                    name="localLlmBaseUrl"
+                    value={settings.localLlmBaseUrl || ''}
+                    onChange={handleChange}
+                    placeholder="e.g., http://127.0.0.1:1234/v1/ (LM Studio) or http://127.0.0.1:11434/v1/ (Ollama)"
+                    disabled={!settings.localLlmEnabled}
+                    className={!settings.localLlmEnabled ? 'opacity-50' : ''}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    <strong>Important:</strong> URL must end with <code className="text-xs bg-muted px-1 py-0.5 rounded">/v1/</code> (with trailing slash).
+                    Any OpenAI-compatible endpoint works. Unlike the custom URL above, this does not replace Groq —
+                    both are available at the same time.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="local-llm-api-key">API Key (Optional)</Label>
+                  <Input
+                    type="password"
+                    id="local-llm-api-key"
+                    name="localLlmApiKey"
+                    value={settings.localLlmApiKey || ''}
+                    onChange={handleChange}
+                    placeholder="Only if your local server requires one"
+                    disabled={!settings.localLlmEnabled}
+                    className={!settings.localLlmEnabled ? 'opacity-50' : ''}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Most local servers need no key. Models are fetched live from the server&apos;s /v1/models.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
             {/* Claude (Anthropic) Configuration */}
             <Card>
               <CardHeader>
@@ -1479,6 +1694,228 @@ function Settings() {
                     Controls reasoning depth for GPT models. GPT-5.4 defaults to none; temperature/top_p only work with none.
                   </p>
                 </div>
+              </CardContent>
+            </Card>
+
+            {/* Speech to Text */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <Mic className="h-5 w-5 text-primary" />
+                  <span>Speech to Text</span>
+                </CardTitle>
+                <CardDescription>
+                  Whisper provider for dictation and the voice agent — model lists are fetched live from each provider
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Provider</Label>
+                  <Select
+                    value={sttProvider}
+                    onValueChange={(value) => handleSelectChange('sttProvider', value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select STT provider" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="groq">Groq (cloud)</SelectItem>
+                      <SelectItem value="openai">OpenAI (cloud)</SelectItem>
+                      <SelectItem value="local">Local — mlx-whisper (on-device)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Model</Label>
+                  <Select
+                    value={settings[sttModelKey] || ''}
+                    onValueChange={(value) => handleSelectChange(sttModelKey, value)}
+                    disabled={sttModelOptions.length === 0}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={audioModels ? 'Select model' : 'Loading models…'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {sttModelOptions.map((id) => (
+                        <SelectItem key={id} value={id}>
+                          {sttProvider === 'local'
+                            ? `${id.replace('mlx-community/', '')}${(audioModels?.localDownloaded || []).includes(id) ? ' ✓' : ''}`
+                            : id}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {sttProvider === 'openai' && !openaiKeySet && (
+                    <p className="text-xs text-amber-500">
+                      Requires the OpenAI API key above.
+                    </p>
+                  )}
+                  {sttProvider === 'local' && (
+                    <p className="text-xs text-muted-foreground">
+                      {localModelInfo?.sizeBytes
+                        ? `Download size: ${formatBytes(localModelInfo.sizeBytes)}`
+                        : 'All mlx-community whisper builds from HuggingFace (✓ = already on disk).'}
+                      {localModelInfo &&
+                        (localModelInfo.downloaded
+                          ? ' — already on disk ✓'
+                          : ' — downloads on first load')}
+                    </p>
+                  )}
+                </div>
+
+                {sttProvider === 'local' && (
+                  audioModels && audioModels.localSupported === false ? (
+                    <div className="flex items-center gap-2 border border-amber-500/30 bg-amber-500/10 rounded-lg px-3 py-2">
+                      <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
+                      <span className="text-sm">
+                        Local Whisper needs Apple Silicon and uv (docs.astral.sh/uv).
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <Label>Local model (RAM)</Label>
+                      <SidecarStatusRow
+                        status={whisperStatus}
+                        onLoad={handleWhisperLoad}
+                        onUnload={handleWhisperUnload}
+                      />
+                      {whisperStatus.state === 'ready' &&
+                        whisperStatus.model &&
+                        settings.sttModelLocal &&
+                        whisperStatus.model !== settings.sttModelLocal && (
+                          <p className="text-xs text-amber-500">
+                            A different model is loaded — click Load to switch to the selected one.
+                          </p>
+                        )}
+                      {localModelInfo?.downloaded && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDeleteLocalModel(settings.sttModelLocal)}
+                          className="text-red-500 hover:text-red-600"
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Delete download
+                          {localModelInfo?.sizeBytes ? ` (${formatBytes(localModelInfo.sizeBytes)})` : ''}
+                        </Button>
+                      )}
+                      <p className="text-xs text-muted-foreground">
+                        Downloads from HuggingFace on first load, then stays in RAM until you unload it
+                        (auto-loads on first use otherwise). Deleting removes the files from disk only.
+                      </p>
+                    </div>
+                  )
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Text to Speech */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <Volume2 className="h-5 w-5 text-primary" />
+                  <span>Text to Speech</span>
+                </CardTitle>
+                <CardDescription>
+                  Voice used when the agent speaks its replies
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Provider</Label>
+                  <Select
+                    value={ttsProvider}
+                    onValueChange={(value) => handleSelectChange('ttsProvider', value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select TTS provider" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="kokoro">Kokoro — local MLX (on-device)</SelectItem>
+                      <SelectItem value="openai">OpenAI (cloud)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {ttsProvider === 'kokoro' && audioModels && audioModels.kokoroSupported === false && (
+                    <p className="text-xs text-amber-500">
+                      Kokoro needs Apple Silicon and uv — pick OpenAI instead on this machine.
+                    </p>
+                  )}
+                  {ttsProvider === 'openai' && !openaiKeySet && (
+                    <p className="text-xs text-amber-500">
+                      Requires the OpenAI API key above.
+                    </p>
+                  )}
+                </div>
+
+                {ttsProvider === 'kokoro' ? (
+                  <div className="space-y-2">
+                    <Label>Kokoro model (RAM)</Label>
+                    <SidecarStatusRow
+                      status={kokoroStatus}
+                      onLoad={handleKokoroLoad}
+                      onUnload={handleKokoroUnload}
+                    />
+                    {audioModels?.kokoroDownloaded && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDeleteLocalModel(audioModels.kokoroModelId)}
+                        className="text-red-500 hover:text-red-600"
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        Delete download
+                      </Button>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      Preload for instant speech when the agent starts; unload to free RAM. The agent
+                      loads it automatically when needed. Deleting removes the files from disk only.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      <Label>Model</Label>
+                      <Select
+                        value={settings.ttsOpenaiModel || ''}
+                        onValueChange={(value) => handleSelectChange('ttsOpenaiModel', value)}
+                        disabled={ttsModelOptions.length === 0}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder={audioModels ? 'Select model' : 'Loading models…'} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {ttsModelOptions.map((id) => (
+                            <SelectItem key={id} value={id}>
+                              {id}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Voice</Label>
+                      <Select
+                        value={settings.ttsOpenaiVoice || ''}
+                        onValueChange={(value) => handleSelectChange('ttsOpenaiVoice', value)}
+                        disabled={ttsVoiceOptions.length === 0}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select voice" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {ttsVoiceOptions.map((voice) => (
+                            <SelectItem key={voice} value={voice}>
+                              {voice.charAt(0).toUpperCase() + voice.slice(1)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </>
+                )}
               </CardContent>
             </Card>
 

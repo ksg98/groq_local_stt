@@ -110,6 +110,12 @@ contextBridge.exposeInMainWorld('electron', {
   getMcpTools: () => ipcRenderer.invoke('get-mcp-tools'),
   // Function to get model configurations
   getModelConfigs: () => ipcRenderer.invoke('get-model-configs'),
+  // STT/TTS model choices for the Settings pickers (fetched live per provider)
+  getAudioModels: () => ipcRenderer.invoke('get-audio-models'),
+  // Download size (live from HuggingFace) + on-disk state for a local model
+  getLocalModelInfo: (modelId) => ipcRenderer.invoke('get-local-model-info', modelId),
+  // Remove a local model's files from the HuggingFace cache
+  deleteLocalModel: (modelId) => ipcRenderer.invoke('delete-local-model', modelId),
   
   // Add event listener for MCP server status changes
   onMcpServerStatusChanged: (callback) => {
@@ -211,11 +217,12 @@ contextBridge.exposeInMainWorld('electron', {
     openMicSettings: () => ipcRenderer.invoke('speech-to-text-open-mic-settings'),
   },
 
-  // Text-to-Speech (Kokoro sidecar)
+  // Text-to-Speech (Kokoro sidecar or OpenAI, per settings.ttsProvider)
   tts: {
     isSupported: () => ipcRenderer.invoke('tts-supported'),
     getState: () => ipcRenderer.invoke('tts-state'),
     start: () => ipcRenderer.invoke('tts-start'),
+    loadKokoro: () => ipcRenderer.invoke('tts-load-kokoro'),
     speak: (request) => ipcRenderer.invoke('tts-speak', request),
     cancel: () => ipcRenderer.invoke('tts-cancel'),
     stop: () => ipcRenderer.invoke('tts-stop'),
@@ -238,6 +245,19 @@ contextBridge.exposeInMainWorld('electron', {
       const listener = (_event, data) => callback(data);
       ipcRenderer.on('tts-error', listener);
       return () => ipcRenderer.removeListener('tts-error', listener);
+    },
+  },
+
+  // Local Whisper STT sidecar (mlx-whisper) — load/unload + state for Settings
+  sttLocal: {
+    isSupported: () => ipcRenderer.invoke('stt-local-supported'),
+    getState: () => ipcRenderer.invoke('stt-local-state'),
+    start: () => ipcRenderer.invoke('stt-local-start'),
+    stop: () => ipcRenderer.invoke('stt-local-stop'),
+    onStatus: (callback) => {
+      const listener = (_event, status) => callback(status);
+      ipcRenderer.on('stt-local-status', listener);
+      return () => ipcRenderer.removeListener('stt-local-status', listener);
     },
   },
 

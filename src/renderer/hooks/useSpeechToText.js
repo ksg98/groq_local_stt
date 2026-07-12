@@ -1,13 +1,36 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { utils } from '@ricky0123/vad-web';
 
 /**
- * Custom hook for speech-to-text functionality using Groq's Whisper API
+ * Local Whisper can't decode webm/opus (no ffmpeg in the sidecar), so convert
+ * the recording to the 16kHz mono PCM WAV it expects.
+ */
+async function blobToWav16k(audioBlob) {
+  const arrayBuffer = await audioBlob.arrayBuffer();
+  const decodeCtx = new AudioContext();
+  try {
+    const decoded = await decodeCtx.decodeAudioData(arrayBuffer);
+    const offline = new OfflineAudioContext(1, Math.ceil(decoded.duration * 16000), 16000);
+    const source = offline.createBufferSource();
+    source.buffer = decoded;
+    source.connect(offline.destination);
+    source.start();
+    const rendered = await offline.startRendering();
+    return utils.encodeWAV(rendered.getChannelData(0), 1, 16000, 1, 16);
+  } finally {
+    decodeCtx.close();
+  }
+}
+
+/**
+ * Custom hook for speech-to-text functionality (provider picked in Settings:
+ * Groq / OpenAI / local mlx-whisper)
  *
  * Features:
  * - Recording with MediaRecorder API
  * - Timer display
  * - Push-to-talk support (space bar)
- * - Automatic transcription via Groq API
+ * - Automatic transcription via the configured STT provider
  */
 export function useSpeechToText({ onTranscription, onError }) {
   const [isRecording, setIsRecording] = useState(false);
@@ -221,23 +244,30 @@ export function useSpeechToText({ onTranscription, onError }) {
     console.log('[SpeechToText] Recording cancelled');
   }, [stopTimer]);
 
-  // Process recorded audio through Groq API
+  // Process recorded audio through the configured STT provider
   const processAudio = useCallback(async (audioBlob) => {
     try {
       setIsTranscribing(true);
       setError(null);
 
-      // Convert blob to array buffer, then to regular array for IPC
-      const arrayBuffer = await audioBlob.arrayBuffer();
-      const audioData = Array.from(new Uint8Array(arrayBuffer));
+      // Provider/model resolve in the main process from Settings; the local
+      // sidecar additionally needs WAV instead of MediaRecorder's webm.
+      const settings = await window.electron.getSettings().catch(() => ({}));
+      const options = { response_format: 'verbose_json' };
+      let audioData;
+      if (settings?.sttProvider === 'local') {
+        const wav = await blobToWav16k(audioBlob);
+        audioData = Array.from(new Uint8Array(wav));
+        options.format = 'wav';
+      } else {
+        const arrayBuffer = await audioBlob.arrayBuffer();
+        audioData = Array.from(new Uint8Array(arrayBuffer));
+      }
 
       console.log('[SpeechToText] Sending audio for transcription, size:', audioData.length);
 
       // Send to main process for transcription
-      const result = await window.electron.speechToText.transcribe(audioData, {
-        model: 'whisper-large-v3-turbo',
-        response_format: 'verbose_json',
-      });
+      const result = await window.electron.speechToText.transcribe(audioData, options);
 
       console.log('[SpeechToText] Transcription result:', result);
 

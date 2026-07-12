@@ -171,6 +171,63 @@ async function fetchChatgptModels({ token, accountId }) {
   return models;
 }
 
+// Local OpenAI-compatible LLM server (LM Studio, Ollama, mlx_lm.server, …).
+// Its own base-URL slot so it works ALONGSIDE Groq instead of replacing the
+// Groq endpoint like customApiBaseUrl does. Models are namespaced 'local:' and
+// served through the Groq chat-completions path with the local base URL.
+const LOCAL_MODEL_PREFIX = 'local:';
+
+async function fetchLocalLlmModels(baseUrl, apiKey) {
+  const url = `${baseUrl.replace(/\/+$/, '')}/models`;
+  const response = await fetch(url, {
+    headers: apiKey && apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : {},
+  });
+  if (!response.ok) {
+    throw new Error(`Local model server returned HTTP ${response.status}`);
+  }
+  const json = await response.json();
+  const list = Array.isArray(json?.data) ? json.data : Array.isArray(json) ? json : [];
+  const models = {};
+  for (const m of list) {
+    const id = typeof m === 'string' ? m : m?.id;
+    if (!id) continue;
+    models[`${LOCAL_MODEL_PREFIX}${id}`] = {
+      displayName: `${id} (Local)`,
+      context: 32768, // /v1/models doesn't report context; override via Custom Models if needed
+      vision_supported: false,
+      builtin_tools_supported: false,
+      provider: 'local',
+      max_tokens_default: 8192,
+      reasoning: null,
+    };
+  }
+  if (Object.keys(models).length === 0) {
+    throw new Error('Local model server returned no models');
+  }
+  console.log(`[ProviderModels] Loaded ${Object.keys(models).length} models from local server`);
+  return models;
+}
+
+async function getLocalLlmModels(settings) {
+  const baseUrl = (settings.localLlmBaseUrl || '').trim();
+  if (!settings.localLlmEnabled || !baseUrl) return {};
+
+  const cache = providerCaches.localLlm;
+  const now = Date.now();
+  if (cache.models && cache.key === baseUrl && now - cache.ts < CACHE_DURATION) {
+    return cache.models;
+  }
+  try {
+    cache.models = await fetchLocalLlmModels(baseUrl, settings.localLlmApiKey);
+    cache.ts = now;
+    cache.key = baseUrl;
+    return cache.models;
+  } catch (err) {
+    console.error('[ProviderModels] Failed to fetch local LLM models:', err.message);
+    return cache.key === baseUrl && cache.models ? cache.models : {};
+  }
+}
+
 function isValidKey(key) {
   return (
     typeof key === 'string' &&
@@ -354,6 +411,129 @@ async function fetchOpenAIModels(apiKey) {
 }
 
 // ---------------------------------------------------------------------------
+// Audio models (STT whisper + TTS) — fetched live from each provider's models
+// API, same as the chat models. Static lists below are offline fallbacks only.
+// ---------------------------------------------------------------------------
+
+const AUDIO_FALLBACKS = {
+  sttGroq: ['whisper-large-v3-turbo', 'whisper-large-v3'],
+  sttOpenai: ['gpt-4o-mini-transcribe', 'gpt-4o-transcribe', 'whisper-1'],
+  ttsOpenai: ['gpt-4o-mini-tts', 'tts-1', 'tts-1-hd'],
+  sttLocal: [
+    'mlx-community/whisper-large-v3-turbo',
+    'mlx-community/whisper-large-v3-mlx',
+    'mlx-community/whisper-medium-mlx',
+    'mlx-community/whisper-small-mlx',
+    'mlx-community/whisper-base-mlx',
+    'mlx-community/whisper-tiny',
+  ],
+};
+
+// The speech API has no voices endpoint; this is the documented voice set.
+const OPENAI_TTS_VOICES = [
+  'alloy', 'ash', 'ballad', 'coral', 'echo', 'fable',
+  'nova', 'onyx', 'sage', 'shimmer', 'verse',
+];
+
+async function fetchGroqAudioModels(apiKey) {
+  const json = await httpsGetJson('https://api.groq.com/openai/v1/models', {
+    Authorization: `Bearer ${apiKey}`,
+  });
+  const ids = (json?.data || [])
+    .map((m) => m.id)
+    .filter((id) => id.toLowerCase().includes('whisper'))
+    .sort();
+  if (ids.length === 0) throw new Error('no whisper models in Groq response');
+  console.log(`[ProviderModels] Loaded ${ids.length} Groq whisper models from API`);
+  return ids;
+}
+
+async function fetchOpenAIAudioModels(apiKey) {
+  const json = await httpsGetJson('https://api.openai.com/v1/models', {
+    Authorization: `Bearer ${apiKey}`,
+  });
+  const ids = (json?.data || []).map((m) => m.id);
+  const stt = ids
+    .filter((id) => /whisper|transcribe/i.test(id) && !/realtime/i.test(id))
+    .sort();
+  const tts = ids.filter((id) => /tts/i.test(id) && !/realtime/i.test(id)).sort();
+  if (stt.length === 0 && tts.length === 0) {
+    throw new Error('no audio models in OpenAI response');
+  }
+  console.log(`[ProviderModels] Loaded ${stt.length} OpenAI STT + ${tts.length} TTS models from API`);
+  return { stt, tts };
+}
+
+// Local whisper catalog: everything mlx-whisper can run, straight from the
+// mlx-community org on HuggingFace, most-downloaded first.
+async function fetchLocalWhisperModels() {
+  const json = await httpsGetJson(
+    'https://huggingface.co/api/models?author=mlx-community&search=whisper&sort=downloads&direction=-1&limit=50',
+    { 'User-Agent': 'groq-desktop' }
+  );
+  const ids = (Array.isArray(json) ? json : [])
+    .map((m) => m.id)
+    .filter((id) => id && id.toLowerCase().includes('whisper'));
+  if (ids.length === 0) throw new Error('empty HuggingFace model list');
+  console.log(`[ProviderModels] Loaded ${ids.length} mlx-community whisper models from HuggingFace`);
+  return ids;
+}
+
+// Exact download size for a local model, straight from the HuggingFace tree
+// API (sums the real file sizes — repo usedStorage overcounts). Cached per id.
+const localModelInfoCache = new Map();
+
+async function fetchLocalModelInfo(modelId) {
+  if (localModelInfoCache.has(modelId)) return localModelInfoCache.get(modelId);
+  const files = await httpsGetJson(
+    `https://huggingface.co/api/models/${modelId}/tree/main`,
+    { 'User-Agent': 'groq-desktop' }
+  );
+  const sizeBytes = (Array.isArray(files) ? files : []).reduce(
+    (sum, f) => sum + (f && typeof f.size === 'number' ? f.size : 0),
+    0
+  );
+  const info = { sizeBytes };
+  localModelInfoCache.set(modelId, info);
+  return info;
+}
+
+async function getCachedAudioList(cacheKey, fetcher, fallback) {
+  const cache = providerCaches[cacheKey];
+  const now = Date.now();
+  if (cache.models && now - cache.ts < CACHE_DURATION) return cache.models;
+  try {
+    cache.models = await fetcher();
+    cache.ts = now;
+    return cache.models;
+  } catch (err) {
+    console.error(`[ProviderModels] Failed to fetch ${cacheKey} models:`, err.message);
+    return cache.models || fallback;
+  }
+}
+
+/**
+ * Model choices for the Settings STT/TTS pickers, fetched live per provider
+ * (Groq + OpenAI need their API key; the local list needs no key).
+ */
+async function getAudioModels(settings = {}) {
+  const openaiFallback = { stt: AUDIO_FALLBACKS.sttOpenai, tts: AUDIO_FALLBACKS.ttsOpenai };
+  const [sttGroq, openaiAudio, sttLocal] = await Promise.all([
+    isValidKey(settings.GROQ_API_KEY)
+      ? getCachedAudioList('sttGroq', () => fetchGroqAudioModels(settings.GROQ_API_KEY), AUDIO_FALLBACKS.sttGroq)
+      : Promise.resolve(AUDIO_FALLBACKS.sttGroq),
+    isValidKey(settings.OPENAI_API_KEY)
+      ? getCachedAudioList('openaiAudio', () => fetchOpenAIAudioModels(settings.OPENAI_API_KEY), openaiFallback)
+      : Promise.resolve(openaiFallback),
+    getCachedAudioList('sttLocal', fetchLocalWhisperModels, AUDIO_FALLBACKS.sttLocal),
+  ]);
+  return {
+    stt: { groq: sttGroq, openai: openaiAudio.stt, local: sttLocal },
+    tts: { openai: openaiAudio.tts, voices: OPENAI_TTS_VOICES },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Caching (same pattern as shared/models.js for Groq)
 // ---------------------------------------------------------------------------
 
@@ -361,6 +541,10 @@ const providerCaches = {
   anthropic: { models: null, ts: 0 },
   openai: { models: null, ts: 0 },
   chatgpt: { models: null, ts: 0 },
+  localLlm: { models: null, ts: 0, key: null },
+  sttGroq: { models: null, ts: 0 },
+  openaiAudio: { models: null, ts: 0 },
+  sttLocal: { models: null, ts: 0 },
 };
 
 // Live ChatGPT subscription catalog with cache; static fallback when the
@@ -423,13 +607,15 @@ async function getCachedProviderModels(provider, apiKey, fetcher, staticFallback
  */
 async function getProviderModels(settings = {}) {
   // ChatGPT subscription models (when signed in) are offered in addition to
-  // the API-key models — both auth modes work side by side.
-  const [anthropic, openai, chatgpt] = await Promise.all([
+  // the API-key models — both auth modes work side by side. Same for the
+  // local model server: its models sit next to Groq's, not instead of them.
+  const [anthropic, openai, chatgpt, localLlm] = await Promise.all([
     getCachedProviderModels('anthropic', settings.ANTHROPIC_API_KEY, fetchAnthropicModels, ANTHROPIC_MODELS),
     getCachedProviderModels('openai', settings.OPENAI_API_KEY, fetchOpenAIModels, OPENAI_MODELS),
     getChatgptModels(settings),
+    getLocalLlmModels(settings),
   ]);
-  return { ...anthropic, ...openai, ...chatgpt };
+  return { ...anthropic, ...openai, ...chatgpt, ...localLlm };
 }
 
 /**
@@ -440,6 +626,9 @@ function getProviderForModel(modelId, modelContextSizes) {
   if (ANTHROPIC_MODELS[modelId]) return 'anthropic';
   if (OPENAI_MODELS[modelId]) return 'openai';
   if (modelId && modelId.startsWith(CHATGPT_MODEL_PREFIX)) return 'openai';
+  // Local server speaks OpenAI chat-completions — served by the Groq path
+  // with the local base URL swapped in (see chatHandler).
+  if (modelId && modelId.startsWith(LOCAL_MODEL_PREFIX)) return 'groq';
 
   // Check if the model in modelContextSizes has a provider field
   const modelInfo = modelContextSizes && modelContextSizes[modelId];
@@ -453,6 +642,9 @@ module.exports = {
   OPENAI_MODELS,
   CHATGPT_MODELS,
   CHATGPT_MODEL_PREFIX,
+  LOCAL_MODEL_PREFIX,
   getProviderModels,
   getProviderForModel,
+  getAudioModels,
+  fetchLocalModelInfo,
 };

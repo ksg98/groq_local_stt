@@ -11,7 +11,7 @@ import { useVoiceAgent } from './hooks/useVoiceAgent';
 import { useMediaCapture } from './hooks/useMediaCapture';
 // Import shared model definitions - REMOVED
 // import { MODEL_CONTEXT_SIZES } from '../../shared/models';
-import { Settings, Zap, MessageSquare, PanelLeftClose, PanelLeft, Radio, MessagesSquare, AudioLines, Loader2, X } from 'lucide-react';
+import { Settings, Zap, MessageSquare, PanelLeftClose, PanelLeft, Radio, MessagesSquare } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { Badge } from './components/ui/badge';
 
@@ -1874,47 +1874,7 @@ function App() {
                 </Button>
               )}
               
-              {/* Kokoro model RAM status / preload (idle agent only) */}
-              {voiceAgent.supported && !voiceAgent.active && (
-                voiceAgent.sidecarLoaded ? (
-                  <div
-                    className="flex items-center gap-2 bg-green-500/10 border border-green-500/30 rounded-xl px-3 py-1.5"
-                    title="Kokoro voice model is loaded in RAM — unload to free memory"
-                  >
-                    <div className="w-2 h-2 bg-green-500 rounded-full" />
-                    <span className="text-sm font-medium text-green-700">Voice in RAM</span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={voiceAgent.unloadTts}
-                      className="p-1 h-6 w-6 text-green-700 hover:text-red-600 hover:bg-black/10 rounded-lg"
-                      title="Unload Kokoro model from RAM"
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ) : voiceAgent.sidecarLoading ? (
-                  <div
-                    className="flex items-center gap-2 bg-muted/40 border border-border/50 rounded-xl px-3 py-1.5 text-muted-foreground"
-                    title={voiceAgent.ttsStatus?.detail || 'Loading Kokoro voice model into RAM'}
-                  >
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    <span className="text-sm font-medium">Loading voice…</span>
-                  </div>
-                ) : (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={voiceAgent.loadTts}
-                    className="text-muted-foreground hover:text-foreground"
-                    title="Preload the Kokoro voice model into RAM (faster agent start)"
-                  >
-                    <AudioLines className="h-4 w-4 mr-2" />
-                    Load voice
-                  </Button>
-                )
-              )}
-
+              {/* Voice model load/unload moved to Settings > Text to Speech */}
               <Link to="/settings">
                 <Button variant="ghost" size="icon" className="text-foreground hover:text-foreground">
                   <Settings className="h-5 w-5" />

@@ -1,6 +1,7 @@
 const { app } = require('electron');
 const fs   = require('fs');
 const path = require('path');
+const os   = require('os');
 const { globalShortcut } = require('electron');
 
 // Create ~/Library/Logs/Groq Desktop if it does not exist
@@ -35,7 +36,7 @@ protocol.registerSchemesAsPrivileged([
 
 // Import shared models
 const { MODEL_CONTEXT_SIZES, getModelContextSizes, getModelsFromAPIWithCache } = require('../shared/models.js');
-const { getProviderModels } = require('../shared/providerModels.js');
+const { getProviderModels, getAudioModels, fetchLocalModelInfo } = require('../shared/providerModels.js');
 
 // Import handlers
 const chatHandler = require('./chatHandler');
@@ -62,6 +63,7 @@ const speechToTextHandler = require('./speechToTextHandler');
 
 // Import TTS (Kokoro sidecar) and screen/camera capture handlers
 const ttsHandler = require('./ttsHandler');
+const sttLocalHandler = require('./sttLocalHandler');
 const captureHandler = require('./captureHandler');
 
 // Global variable to hold the main window instance
@@ -279,6 +281,72 @@ app.whenReady().then(async () => {
     return JSON.parse(JSON.stringify(mergedModelContextSizes));
   });
 
+  // Local models live in the shared HuggingFace cache; "downloaded" means the
+  // weights blob is actually there (metadata-only stubs don't count).
+  const HF_HUB_DIR = path.join(os.homedir(), '.cache', 'huggingface', 'hub');
+  const KOKORO_MODEL_ID = 'mlx-community/Kokoro-82M-bf16';
+  const isValidHfModelId = (id) => typeof id === 'string' && /^[\w.-]+\/[\w.-]+$/.test(id);
+  const hfModelDir = (modelId) => path.join(HF_HUB_DIR, `models--${modelId.replace(/\//g, '--')}`);
+  const isHfModelDownloaded = (modelId) => {
+    try {
+      const blobs = path.join(hfModelDir(modelId), 'blobs');
+      return fs.readdirSync(blobs).some((f) => {
+        try { return fs.statSync(path.join(blobs, f)).size > 10 * 1024 * 1024; } catch { return false; }
+      });
+    } catch { return false; }
+  };
+
+  // STT/TTS model choices for the Settings pickers (fetched live, cached)
+  ipcMain.handle('get-audio-models', async () => {
+    const currentSettings = loadSettings();
+    let audioModels;
+    try {
+      audioModels = await getAudioModels(currentSettings);
+    } catch (error) {
+      console.error('Error fetching audio models:', error);
+      audioModels = { stt: { groq: [], openai: [], local: [] }, tts: { openai: [], voices: [] } };
+    }
+    return {
+      ...audioModels,
+      localDownloaded: (audioModels.stt.local || []).filter(isHfModelDownloaded),
+      kokoroModelId: KOKORO_MODEL_ID,
+      kokoroDownloaded: isHfModelDownloaded(KOKORO_MODEL_ID),
+      kokoroSupported: ttsHandler.isSupported(),
+      localSupported: sttLocalHandler.isSupported(),
+    };
+  });
+
+  // Exact download size (live from HuggingFace) + on-disk state for one model
+  ipcMain.handle('get-local-model-info', async (_event, modelId) => {
+    if (!isValidHfModelId(modelId)) return null;
+    let sizeBytes = null;
+    try {
+      sizeBytes = (await fetchLocalModelInfo(modelId)).sizeBytes || null;
+    } catch { /* offline — size stays unknown */ }
+    return { sizeBytes, downloaded: isHfModelDownloaded(modelId) };
+  });
+
+  // Delete a model's files from the HuggingFace cache (re-downloads on next
+  // load). Stops the sidecar first if that exact model is loaded in RAM.
+  ipcMain.handle('delete-local-model', async (_event, modelId) => {
+    if (!isValidHfModelId(modelId)) return { ok: false, error: 'Invalid model id' };
+    const dir = hfModelDir(modelId);
+    if (!dir.startsWith(HF_HUB_DIR + path.sep)) return { ok: false, error: 'Invalid path' };
+    try {
+      if (modelId === KOKORO_MODEL_ID) {
+        ttsHandler.shutdown();
+      } else if (sttLocalHandler.getCurrentModel() === modelId) {
+        sttLocalHandler.shutdown();
+      }
+      fs.rmSync(dir, { recursive: true, force: true });
+      console.log('[AudioModels] Deleted local model from disk:', modelId);
+      return { ok: true };
+    } catch (error) {
+      console.error('[AudioModels] Failed to delete local model:', error);
+      return { ok: false, error: error.message };
+    }
+  });
+
   ipcMain.handle('get-captured-context', async () => {
     // Return the most recently captured context
     const context = lastCapturedContext;
@@ -333,10 +401,11 @@ app.whenReady().then(async () => {
   speechToTextHandler.initializeSpeechToTextHandlers(ipcMain, loadSettings);
   console.log("[Main Init] Speech-to-text handler initialized");
 
-  // Initialize TTS (Kokoro sidecar) and capture handlers
-  ttsHandler.initializeTtsHandlers(ipcMain, app);
+  // Initialize TTS (Kokoro/OpenAI), local STT (mlx-whisper) and capture handlers
+  ttsHandler.initializeTtsHandlers(ipcMain, app, loadSettings);
+  sttLocalHandler.initializeSttLocalHandlers(ipcMain, app, loadSettings);
   captureHandler.initializeCaptureHandlers(ipcMain);
-  console.log("[Main Init] TTS and capture handlers initialized");
+  console.log("[Main Init] TTS, local STT and capture handlers initialized");
 
   // Initialize MCP handlers (use module object)
   mcpManager.initializeMcpHandlers(ipcMain, app, mainWindow, loadSettings, resolveCommandPath);
@@ -509,10 +578,11 @@ if (!gotTheLock) {
   // Continue with app initialization
 }
 
-// Clean up context capture and the TTS sidecar on app quit
+// Clean up context capture and the TTS/STT sidecars on app quit
 app.on('before-quit', () => {
   cleanupContextCapture();
   ttsHandler.shutdown();
+  sttLocalHandler.shutdown();
 });
 
 // Note: App lifecycle events (window-all-closed, activate) are now handled by windowManager.js

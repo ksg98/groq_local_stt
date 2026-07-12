@@ -3,14 +3,19 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-// Kokoro TTS sidecar manager. Spawns electron/python/kokoro_server.py via uv
-// and bridges its NDJSON stdio protocol to the renderer over IPC events:
+// TTS engine manager behind one renderer-facing IPC surface:
 //   tts-status { state, ... }   tts-audio-chunk { id, sr, chunk }
 //   tts-speak-done { id }       tts-error { id, message }
+// Engine picked by settings.ttsProvider at tts-start:
+//   'kokoro' — spawns electron/python/kokoro_server.py via uv (local MLX)
+//   'openai' — streams PCM from the OpenAI /v1/audio/speech API
 
 const MLX_AUDIO_SPEC = 'mlx-audio==0.4.4';
+const OPENAI_TTS_SR = 24000; // response_format 'pcm' is 24kHz s16le mono
 
 let appInstance = null;
+let loadSettingsFn = null;
+let engine = 'kokoro';
 let child = null;
 let targetWebContents = null;
 let stdoutBuf = '';
@@ -164,6 +169,86 @@ function startSidecar(webContents) {
   return { ok: true };
 }
 
+// --- OpenAI TTS engine -------------------------------------------------------
+
+let openaiQueue = Promise.resolve(); // serializes sentences so audio stays in order
+let openaiGen = 0; // bumped by cancel; queued/streaming jobs of older generations bail
+let openaiAbort = null;
+
+function hasOpenAIKey(settings) {
+  const key = settings.OPENAI_API_KEY;
+  return typeof key === 'string' && key.trim() !== '' && !key.includes('<replace me>');
+}
+
+function startOpenai(webContents, settings) {
+  targetWebContents = webContents;
+  engine = 'openai';
+  if (!hasOpenAIKey(settings)) {
+    setStatus({ state: 'error', message: 'OpenAI API key not configured — add it in Settings.' });
+    return { ok: false, error: 'OpenAI API key not configured — add it in Settings.' };
+  }
+  openaiGen += 1; // drop anything left over from a previous session
+  setStatus({ state: 'ready', engine: 'openai' });
+  return { ok: true };
+}
+
+function openaiSpeak({ id, text }) {
+  const settings = loadSettingsFn ? loadSettingsFn() : {};
+  const apiKey = settings.OPENAI_API_KEY;
+  const model = settings.ttsOpenaiModel || 'gpt-4o-mini-tts';
+  const voice = settings.ttsOpenaiVoice || 'alloy';
+  const myGen = openaiGen;
+  openaiQueue = openaiQueue.then(async () => {
+    if (openaiGen !== myGen) return; // cancelled while waiting in the queue
+    const controller = new AbortController();
+    openaiAbort = controller;
+    try {
+      const response = await fetch('https://api.openai.com/v1/audio/speech', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ model, voice, input: text, response_format: 'pcm' }),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const detail = await response.text().catch(() => '');
+        throw new Error(`OpenAI TTS HTTP ${response.status}: ${detail.slice(0, 200)}`);
+      }
+      let carry = Buffer.alloc(0); // network chunks can split a 16-bit sample
+      for await (const part of response.body) {
+        if (openaiGen !== myGen) {
+          controller.abort();
+          return;
+        }
+        const buf = Buffer.concat([carry, Buffer.from(part)]);
+        const usable = buf.length - (buf.length % 2);
+        carry = buf.subarray(usable);
+        if (usable > 0) {
+          send('tts-audio-chunk', { id, sr: OPENAI_TTS_SR, chunk: buf.subarray(0, usable) });
+        }
+      }
+      send('tts-speak-done', { id });
+    } catch (err) {
+      if (controller.signal.aborted || openaiGen !== myGen) return;
+      console.error('[TTS] OpenAI speech failed:', err.message);
+      send('tts-error', { id, message: err.message });
+    } finally {
+      if (openaiAbort === controller) openaiAbort = null;
+    }
+  });
+  return true;
+}
+
+function openaiCancel() {
+  openaiGen += 1;
+  if (openaiAbort) {
+    try { openaiAbort.abort(); } catch { /* ignore */ }
+    openaiAbort = null;
+  }
+}
+
 function stopSidecar() {
   if (!child) return;
   const proc = child;
@@ -184,21 +269,41 @@ function stopSidecar() {
   });
 }
 
-function initializeTtsHandlers(ipcMain, app) {
+function initializeTtsHandlers(ipcMain, app, loadSettings) {
   appInstance = app;
+  loadSettingsFn = loadSettings;
 
-  ipcMain.handle('tts-supported', () => isSupported());
+  // Provider-aware: kokoro needs Apple Silicon + uv, openai needs an API key
+  ipcMain.handle('tts-supported', () => {
+    const settings = loadSettingsFn ? loadSettingsFn() : {};
+    if ((settings.ttsProvider || 'kokoro') === 'openai') return hasOpenAIKey(settings);
+    return isSupported();
+  });
 
-  // Current sidecar state so the UI can show whether the model sits in RAM
+  // Current Kokoro sidecar state so the UI can show whether the model sits in RAM
   ipcMain.handle('tts-state', () => ({
     running: !!child,
     state: child ? lastStatus.state || 'starting' : 'stopped',
   }));
 
-  ipcMain.handle('tts-start', (event) => startSidecar(event.sender));
+  ipcMain.handle('tts-start', (event) => {
+    const settings = loadSettingsFn ? loadSettingsFn() : {};
+    if ((settings.ttsProvider || 'kokoro') === 'openai') {
+      return startOpenai(event.sender, settings);
+    }
+    engine = 'kokoro';
+    return startSidecar(event.sender);
+  });
+
+  // Settings preloads the Kokoro model explicitly, regardless of ttsProvider
+  ipcMain.handle('tts-load-kokoro', (event) => {
+    engine = 'kokoro';
+    return startSidecar(event.sender);
+  });
 
   ipcMain.handle('tts-speak', (_event, { id, text, voice, speed } = {}) => {
     if (!text || !String(text).trim()) return false;
+    if (engine === 'openai') return openaiSpeak({ id, text: String(text) });
     return writeCommand({
       cmd: 'speak',
       id,
@@ -208,17 +313,29 @@ function initializeTtsHandlers(ipcMain, app) {
     });
   });
 
-  ipcMain.handle('tts-cancel', () => writeCommand({ cmd: 'cancel' }));
+  ipcMain.handle('tts-cancel', () => {
+    if (engine === 'openai') {
+      openaiCancel();
+      return true;
+    }
+    return writeCommand({ cmd: 'cancel' });
+  });
 
   ipcMain.handle('tts-stop', () => {
+    openaiCancel();
     stopSidecar();
     return true;
   });
 
-  console.log('[TTS] IPC handlers initialized. Supported:', isSupported());
+  console.log('[TTS] IPC handlers initialized. Kokoro supported:', isSupported());
 }
 
 module.exports = {
   initializeTtsHandlers,
-  shutdown: stopSidecar,
+  findUv,
+  isSupported,
+  shutdown: () => {
+    openaiCancel();
+    stopSidecar();
+  },
 };

@@ -1,35 +1,52 @@
 const Groq = require('groq-sdk');
+const OpenAI = require('openai');
 const { systemPreferences, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const sttLocal = require('./sttLocalHandler');
 
+// Clients are cached per API key so a key change in Settings takes effect
+// without restarting the app.
 let groqClient = null;
+let groqClientKey = null;
+let openaiClient = null;
+let openaiClientKey = null;
 
-/**
- * Initialize the Groq client with API key
- */
-function initializeClient(apiKey) {
-  if (!apiKey || apiKey === "<replace me>") {
-    throw new Error('Valid Groq API key is required for speech-to-text');
+function isValidKey(key) {
+  return typeof key === 'string' && key.trim() !== '' && !key.includes('<replace me>');
+}
+
+function getClient(provider, apiKey) {
+  if (!isValidKey(apiKey)) {
+    throw new Error(`Valid ${provider === 'openai' ? 'OpenAI' : 'Groq'} API key is required for speech-to-text`);
   }
-  groqClient = new Groq({ apiKey });
+  if (provider === 'openai') {
+    if (!openaiClient || openaiClientKey !== apiKey) {
+      openaiClient = new OpenAI({ apiKey });
+      openaiClientKey = apiKey;
+    }
+    return openaiClient;
+  }
+  if (!groqClient || groqClientKey !== apiKey) {
+    groqClient = new Groq({ apiKey });
+    groqClientKey = apiKey;
+  }
   return groqClient;
 }
 
 /**
- * Transcribe audio using Groq's Whisper API
+ * Transcribe audio with a cloud Whisper API (Groq or OpenAI — same
+ * OpenAI-style audio.transcriptions endpoint).
  * @param {Buffer} audioBuffer - The audio data as a Buffer
- * @param {string} apiKey - The Groq API key
- * @param {object} options - Additional options
+ * @param {string} apiKey - The provider API key
+ * @param {object} options - { provider, model, format, response_format, language, temperature }
  * @returns {Promise<{text: string, duration?: number}>}
  */
 async function transcribeAudio(audioBuffer, apiKey, options = {}) {
+  const provider = options.provider === 'openai' ? 'openai' : 'groq';
   try {
-    // Initialize or reinitialize client if needed
-    if (!groqClient) {
-      initializeClient(apiKey);
-    }
+    const client = getClient(provider, apiKey);
 
     // Validate buffer size - need at least 5KB of audio data
     if (!audioBuffer || audioBuffer.length < 5000) {
@@ -47,7 +64,7 @@ async function transcribeAudio(audioBuffer, apiKey, options = {}) {
     // webm/opus; the voice agent sends raw 16kHz WAV instead.
     const ext = options.format === 'wav' ? 'wav' : 'webm';
     const tempDir = os.tmpdir();
-    const tempFilePath = path.join(tempDir, `groq-stt-${Date.now()}.${ext}`);
+    const tempFilePath = path.join(tempDir, `stt-${Date.now()}.${ext}`);
 
     // Write the buffer to a temporary file
     fs.writeFileSync(tempFilePath, audioBuffer);
@@ -57,19 +74,25 @@ async function transcribeAudio(audioBuffer, apiKey, options = {}) {
     console.log('[SpeechToText] Temp file created:', tempFilePath, 'size:', stats.size);
 
     try {
-      // Use Groq SDK's toFile helper for proper file creation
-      const { toFile } = require('groq-sdk');
+      // Use the SDK's toFile helper for proper file creation
+      const { toFile } = provider === 'openai' ? require('openai') : require('groq-sdk');
       const audioFile = await toFile(fs.createReadStream(tempFilePath), `recording.${ext}`, {
         type: ext === 'wav' ? 'audio/wav' : 'audio/webm',
       });
 
-      console.log('[SpeechToText] File object created for API');
+      console.log('[SpeechToText] File object created for API, provider:', provider);
 
-      // Call Groq's transcription API
-      const transcription = await groqClient.audio.transcriptions.create({
+      const model = options.model || 'whisper-large-v3-turbo';
+      // OpenAI's gpt-4o-(mini-)transcribe models only accept json/text
+      const responseFormat =
+        provider === 'openai' && !model.startsWith('whisper')
+          ? 'json'
+          : options.response_format || 'verbose_json';
+
+      const transcription = await client.audio.transcriptions.create({
         file: audioFile,
-        model: options.model || 'whisper-large-v3-turbo',
-        response_format: options.response_format || 'verbose_json',
+        model,
+        response_format: responseFormat,
         language: options.language || undefined, // Auto-detect if not specified
         temperature: options.temperature || 0,
       });
@@ -97,7 +120,9 @@ async function transcribeAudio(audioBuffer, apiKey, options = {}) {
 
     // Provide more specific error messages
     if (error.status === 401) {
-      throw new Error('Invalid API key. Please check your Groq API key in settings.');
+      throw new Error(
+        `Invalid API key. Please check your ${provider === 'openai' ? 'OpenAI' : 'Groq'} API key in settings.`
+      );
     } else if (error.status === 413) {
       throw new Error('Audio file too large. Maximum size is 25MB.');
     } else if (error.status === 400) {
@@ -114,19 +139,52 @@ async function transcribeAudio(audioBuffer, apiKey, options = {}) {
 function initializeSpeechToTextHandlers(ipcMain, loadSettings) {
   console.log('[SpeechToText] Initializing IPC handlers...');
 
-  // Handle transcription request
+  // Handle transcription request. Provider + model come from Settings
+  // (sttProvider / sttModel*) unless the caller overrides via options.
   ipcMain.handle('speech-to-text-transcribe', async (_event, audioData, options = {}) => {
     console.log('[SpeechToText] Received transcription request, size:', audioData?.length || 0);
 
     const settings = loadSettings();
-    if (!settings.GROQ_API_KEY || settings.GROQ_API_KEY === "<replace me>") {
-      throw new Error('Groq API key not configured. Please add your API key in Settings.');
-    }
+    const provider = options.provider || settings.sttProvider || 'groq';
 
     // Convert array to Buffer if needed
     const audioBuffer = Buffer.isBuffer(audioData) ? audioData : Buffer.from(audioData);
 
-    return transcribeAudio(audioBuffer, settings.GROQ_API_KEY, options);
+    if (provider === 'local') {
+      if (!sttLocal.isSupported()) {
+        throw new Error('Local Whisper requires Apple Silicon and uv (https://docs.astral.sh/uv).');
+      }
+      if (options.format !== 'wav') {
+        throw new Error('Local Whisper needs WAV audio — this recording format is not supported.');
+      }
+      if (!audioBuffer || audioBuffer.length < 5000) {
+        return { text: '', duration: 0, skipped: true };
+      }
+      return sttLocal.transcribeLocal(audioBuffer, {
+        model: options.model || settings.sttModelLocal || 'mlx-community/whisper-large-v3-turbo',
+        language: options.language,
+      });
+    }
+
+    if (provider === 'openai') {
+      if (!isValidKey(settings.OPENAI_API_KEY)) {
+        throw new Error('OpenAI API key not configured. Please add your API key in Settings.');
+      }
+      return transcribeAudio(audioBuffer, settings.OPENAI_API_KEY, {
+        ...options,
+        provider: 'openai',
+        model: options.model || settings.sttModelOpenai || 'gpt-4o-mini-transcribe',
+      });
+    }
+
+    if (!isValidKey(settings.GROQ_API_KEY)) {
+      throw new Error('Groq API key not configured. Please add your API key in Settings.');
+    }
+    return transcribeAudio(audioBuffer, settings.GROQ_API_KEY, {
+      ...options,
+      provider: 'groq',
+      model: options.model || settings.sttModelGroq || 'whisper-large-v3-turbo',
+    });
   });
 
   // Microphone permission (macOS). In dev mode the app runs as the generic

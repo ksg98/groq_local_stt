@@ -28,6 +28,9 @@ function loadSettings() {
             toolOutputLimit: 8000,
             customApiBaseUrl: '',
             customApiBaseUrlEnabled: false,
+            localLlmEnabled: false,
+            localLlmBaseUrl: '',
+            localLlmApiKey: '',
             customModels: {},
             disableThinkingSummaries: false,
             useResponsesApi: false,
@@ -45,7 +48,14 @@ function loadSettings() {
             chatgptLastRefreshAt: 0,
             chatgptEmail: "",
             chatgptAccountId: "",
-            chatgptPlanType: ""
+            chatgptPlanType: "",
+            sttProvider: 'groq',
+            sttModelGroq: 'whisper-large-v3-turbo',
+            sttModelOpenai: 'gpt-4o-mini-transcribe',
+            sttModelLocal: 'mlx-community/whisper-large-v3-turbo',
+            ttsProvider: 'kokoro',
+            ttsOpenaiModel: 'gpt-4o-mini-tts',
+            ttsOpenaiVoice: 'alloy'
         };
     }
     const userDataPath = appInstance.getPath('userData');
@@ -68,6 +78,9 @@ function loadSettings() {
         toolOutputLimit: 8000,
         customApiBaseUrl: '',
         customApiBaseUrlEnabled: false,
+        localLlmEnabled: false,
+        localLlmBaseUrl: '',
+        localLlmApiKey: '',
         customModels: {},
         disableThinkingSummaries: false,
         useResponsesApi: false,
@@ -85,7 +98,14 @@ function loadSettings() {
         chatgptLastRefreshAt: 0,
         chatgptEmail: "",
         chatgptAccountId: "",
-        chatgptPlanType: ""
+        chatgptPlanType: "",
+        sttProvider: 'groq',
+        sttModelGroq: 'whisper-large-v3-turbo',
+        sttModelOpenai: 'gpt-4o-mini-transcribe',
+        sttModelLocal: 'mlx-community/whisper-large-v3-turbo',
+        ttsProvider: 'kokoro',
+        ttsOpenaiModel: 'gpt-4o-mini-tts',
+        ttsOpenaiVoice: 'alloy'
     };
 
     try {

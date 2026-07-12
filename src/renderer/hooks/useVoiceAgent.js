@@ -47,11 +47,21 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
   const callbacksRef = useRef({ onTranscript, onStopGeneration, onError });
   callbacksRef.current = { onTranscript, onStopGeneration, onError };
 
+  // tts-supported is provider-aware (kokoro: Apple Silicon + uv; openai: API
+  // key) — re-check when the window regains focus so Settings changes apply.
   useEffect(() => {
-    window.electron?.tts
-      ?.isSupported()
-      .then((ok) => setSupported(!!ok))
-      .catch(() => setSupported(false));
+    const check = () =>
+      window.electron?.tts
+        ?.isSupported()
+        .then((ok) => setSupported(!!ok))
+        .catch(() => setSupported(false));
+    check();
+    window.addEventListener('focus', check);
+    document.addEventListener('visibilitychange', check);
+    return () => {
+      window.removeEventListener('focus', check);
+      document.removeEventListener('visibilitychange', check);
+    };
   }, []);
 
   // Track the sidecar lifecycle independently of the agent session so the UI
@@ -75,7 +85,7 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
 
   // Preload the Kokoro model without starting a voice session
   const loadTts = useCallback(() => {
-    window.electron.tts.start().catch(() => {});
+    (window.electron.tts.loadKokoro || window.electron.tts.start)().catch(() => {});
   }, []);
 
   // Kill the sidecar to free RAM (no-op while a voice session is running)
@@ -136,11 +146,11 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
       transcribingRef.current = true;
       refreshState();
       try {
-        // 16kHz mono int16 WAV (format 1 = PCM)
+        // 16kHz mono int16 WAV (format 1 = PCM); provider + model come from Settings
         const wav = utils.encodeWAV(audio, 1, 16000, 1, 16);
         const result = await window.electron.speechToText.transcribe(
           Array.from(new Uint8Array(wav)),
-          { format: 'wav', model: 'whisper-large-v3-turbo', response_format: 'verbose_json' }
+          { format: 'wav', response_format: 'verbose_json' }
         );
         const text = result?.text?.trim();
         if (text && activeRef.current) {
@@ -210,6 +220,18 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
 
       activeRef.current = true;
       setActive(true);
+
+      // Local STT: warm the mlx-whisper sidecar so the first utterance
+      // doesn't pay the model-load (or download) cost.
+      window.electron
+        .getSettings?.()
+        .then((settings) => {
+          if (settings?.sttProvider === 'local') {
+            window.electron.sttLocal?.start().catch(() => {});
+          }
+        })
+        .catch(() => {});
+
       chunkerRef.current = new SentenceChunker();
       if (!playerRef.current) {
         playerRef.current = new TtsPlayer({
@@ -227,7 +249,7 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
           ttsReadyRef.current = status.state === 'ready';
           if (status.state === 'error') {
             errorRef.current = true;
-            callbacksRef.current.onError?.(status.message || 'Kokoro TTS failed to start');
+            callbacksRef.current.onError?.(status.message || 'Text-to-speech failed to start');
           }
           refreshState();
         }),
