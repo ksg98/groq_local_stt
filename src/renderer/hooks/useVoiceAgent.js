@@ -28,9 +28,12 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
   const [ttsStatus, setTtsStatus] = useState(null);
   // Muted = voice input only: transcripts still auto-send, replies stay text
   const [muted, setMuted] = useState(() => localStorage.getItem('voice_agent_muted') === 'true');
+  // Mic mute = pause the VAD (stop listening) without ending the session. Transient.
+  const [micMuted, setMicMuted] = useState(false);
 
   const activeRef = useRef(false);
   const mutedRef = useRef(muted);
+  const micMutedRef = useRef(false);
   const ttsStartedRef = useRef(false);
   const vadRef = useRef(null);
   const playerRef = useRef(null);
@@ -175,6 +178,8 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
   const stop = useCallback(async () => {
     activeRef.current = false;
     setActive(false);
+    micMutedRef.current = false;
+    setMicMuted(false);
     const vad = vadRef.current;
     vadRef.current = null;
     if (vad) {
@@ -350,6 +355,16 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
     refreshState();
   }, [refreshState]);
 
+  // Mic mute: pause/resume the VAD so the agent stops/starts hearing you.
+  const toggleMicMute = useCallback(() => {
+    const next = !micMutedRef.current;
+    micMutedRef.current = next;
+    setMicMuted(next);
+    if (next) vadRef.current?.pause();
+    else vadRef.current?.start();
+    refreshState();
+  }, [refreshState]);
+
   // Called with every streamed content delta from the assistant
   const feedAssistantDelta = useCallback(
     (delta) => {
@@ -390,6 +405,8 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
     ttsStatus,
     muted,
     toggleMute,
+    micMuted,
+    toggleMicMute,
     sidecarState,
     sidecarLoaded: sidecarState === 'ready',
     sidecarLoading: sidecarState === 'starting' || sidecarState === 'loading',

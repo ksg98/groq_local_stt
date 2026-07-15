@@ -676,7 +676,17 @@ function ChatInput({
 									) : (
 										<div className={cn("w-2 h-2 rounded-full", agentStateInfo.dot)} />
 									)}
-									<span className="text-sm font-medium">{agentStateInfo.label}{voiceAgent.muted ? ' · muted' : ''}</span>
+									<span className="text-sm font-medium">{agentStateInfo.label}{voiceAgent.muted ? ' · muted' : ''}{voiceAgent.micMuted ? ' · mic off' : ''}</span>
+									<Button
+										type="button"
+										variant="ghost"
+										size="sm"
+										onClick={voiceAgent.toggleMicMute}
+										className="p-1 h-6 w-6 hover:bg-black/10 rounded-lg"
+										title={voiceAgent.micMuted ? "Unmute mic — resume listening" : "Mute mic — stop listening"}
+									>
+										{voiceAgent.micMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+									</Button>
 									<Button
 										type="button"
 										variant="ghost"
