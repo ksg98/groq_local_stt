@@ -1585,13 +1585,21 @@ function Settings() {
                       <SelectValue placeholder="Select search provider" />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="duckduckgo">DuckDuckGo (free, no key)</SelectItem>
                       <SelectItem value="tavily">Tavily</SelectItem>
                       <SelectItem value="firecrawl">Firecrawl</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
 
-                {(settings.webSearchProvider || 'tavily') === 'tavily' ? (
+                {(settings.webSearchProvider || 'tavily') === 'duckduckgo' ? (
+                  <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+                    <p className="text-xs text-muted-foreground">
+                      No API key required — DuckDuckGo is free. Results come from its public HTML endpoint,
+                      which is unofficial and may be rate-limited under heavy use. For higher reliability, use Tavily or Firecrawl.
+                    </p>
+                  </div>
+                ) : (settings.webSearchProvider || 'tavily') === 'tavily' ? (
                   <div className="space-y-2">
                     <Label htmlFor="tavily-api-key">Tavily API Key</Label>
                     <Input

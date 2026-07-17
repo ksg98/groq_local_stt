@@ -11,15 +11,17 @@ const WEB_SEARCH_TOOL_NAME = 'web_search';
 
 const DEFAULT_TAVILY_BASE_URL = 'https://api.tavily.com';
 const DEFAULT_FIRECRAWL_BASE_URL = 'https://api.firecrawl.dev';
+const DEFAULT_DUCKDUCKGO_BASE_URL = 'https://html.duckduckgo.com';
 
 function isWebSearchTool(name) {
     return name === WEB_SEARCH_TOOL_NAME;
 }
 
-// Which provider is usable given current settings (has a key), or null.
+// Which provider is usable given current settings, or null. DuckDuckGo needs no key.
 function resolveProvider(settings) {
     if (!settings || !settings.webSearchEnabled) return null;
     const provider = settings.webSearchProvider || 'tavily';
+    if (provider === 'duckduckgo') return 'duckduckgo';
     if (provider === 'tavily' && (settings.TAVILY_API_KEY || '').trim()) return 'tavily';
     if (provider === 'firecrawl' && (settings.FIRECRAWL_API_KEY || '').trim()) return 'firecrawl';
     return null;
@@ -79,6 +81,62 @@ async function searchTavily(query, maxResults, settings) {
     return parts.join('\n\n') || 'No results found.';
 }
 
+// Minimal HTML entity + tag stripping for the DuckDuckGo HTML endpoint.
+function stripHtml(s) {
+    return (s || '')
+        .replace(/<[^>]*>/g, '')
+        .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+        .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
+        .replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+        .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
+        .trim();
+}
+
+// DuckDuckGo wraps result links in a redirect (…/l/?uddg=<encoded>); unwrap it.
+function decodeDdgUrl(href) {
+    const m = href.match(/[?&]uddg=([^&]+)/);
+    if (m) { try { return decodeURIComponent(m[1]); } catch { /* fall through */ } }
+    if (href.startsWith('//')) return 'https:' + href;
+    return href;
+}
+
+function parseDuckDuckGoHtml(html, maxResults) {
+    const results = [];
+    // Match each result link, then grab the snippet that follows it (before the
+    // next result link) so alignment survives skipped ads.
+    const anchorRe = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>([\s\S]*?)(?=<a[^>]+class="result__a"|$)/g;
+    const snippetRe = /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/;
+    let m;
+    while ((m = anchorRe.exec(html)) !== null && results.length < maxResults) {
+        const rawHref = m[1];
+        // Skip sponsored/ad results (DuckDuckGo routes them through /y.js redirects).
+        if (/y\.js|ad_provider|ad_domain/.test(rawHref)) continue;
+        const url = decodeDdgUrl(rawHref);
+        const title = stripHtml(m[2]);
+        if (!title || !url || /duckduckgo\.com\/y\.js/.test(url)) continue;
+        const sm = snippetRe.exec(m[3] || '');
+        results.push({ title, url, snippet: sm ? stripHtml(sm[1]) : '' });
+    }
+    return results;
+}
+
+async function searchDuckDuckGo(query, maxResults, settings) {
+    const baseUrl = (settings.webSearchDuckDuckGoBaseUrl || DEFAULT_DUCKDUCKGO_BASE_URL).replace(/\/+$/, '');
+    const resp = await fetch(`${baseUrl}/html/?q=${encodeURIComponent(query)}`, {
+        method: 'GET',
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            Accept: 'text/html'
+        }
+    });
+    if (!resp.ok) {
+        throw new Error(`DuckDuckGo error ${resp.status} (may be rate-limited — try again shortly).`);
+    }
+    const results = parseDuckDuckGoHtml(await resp.text(), maxResults);
+    if (!results.length) return 'No results found.';
+    return results.map((r, i) => `${i + 1}. ${r.title}\n${r.url}\n${r.snippet}`).join('\n\n');
+}
+
 async function searchFirecrawl(query, maxResults, settings) {
     const baseUrl = (settings.webSearchFirecrawlBaseUrl || DEFAULT_FIRECRAWL_BASE_URL).replace(/\/+$/, '');
     const resp = await fetch(`${baseUrl}/v1/search`, {
@@ -128,7 +186,9 @@ async function executeWebSearch(toolCall, settings) {
     try {
         const text = provider === 'firecrawl'
             ? await searchFirecrawl(query, maxResults, settings)
-            : await searchTavily(query, maxResults, settings);
+            : provider === 'duckduckgo'
+                ? await searchDuckDuckGo(query, maxResults, settings)
+                : await searchTavily(query, maxResults, settings);
         return { result: limitContentLength(text, settings.toolOutputLimit), tool_call_id: toolCallId };
     } catch (error) {
         console.error(`[WebSearch] ${provider} search failed:`, error.message);
