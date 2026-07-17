@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Eye, EyeOff, Plus, Trash2, Edit3, Save, X, RefreshCw, Key, Settings as SettingsIcon, Zap, Cpu, Server, AlertCircle, CheckCircle, Mic, Volume2 } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Plus, Trash2, Edit3, Save, X, RefreshCw, Key, Settings as SettingsIcon, Zap, Cpu, Server, AlertCircle, CheckCircle, Mic, Volume2, Globe } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -103,7 +103,14 @@ function Settings() {
     googleClientId: '',
     googleClientSecret: '',
     googleTokenExpiresAt: null,
-    remoteMcpServers: {}
+    remoteMcpServers: {},
+    webSearchEnabled: false,
+    webSearchProvider: 'tavily',
+    TAVILY_API_KEY: '',
+    FIRECRAWL_API_KEY: '',
+    webSearchMaxResults: 5,
+    webSearchDepth: 'basic',
+    webSearchIncludeAnswer: true
   });
   const [googleOAuthStatus, setGoogleOAuthStatus] = useState(null);
   const [audioModels, setAudioModels] = useState(null);
@@ -315,7 +322,14 @@ function Settings() {
             googleClientId: '',
             googleClientSecret: '',
             googleTokenExpiresAt: null,
-            remoteMcpServers: {}
+            remoteMcpServers: {},
+            webSearchEnabled: false,
+            webSearchProvider: 'tavily',
+            TAVILY_API_KEY: '',
+            FIRECRAWL_API_KEY: '',
+            webSearchMaxResults: 5,
+            webSearchDepth: 'basic',
+            webSearchIncludeAnswer: true
         }));
       }
     };
@@ -1530,6 +1544,122 @@ function Settings() {
                     Most local servers need no key. Models are fetched live from the server&apos;s /v1/models.
                   </p>
                 </div>
+              </CardContent>
+            </Card>
+
+            {/* Web Search (Firecrawl / Tavily) */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <Globe className="h-5 w-5 text-primary" />
+                  <span>Web Search</span>
+                </CardTitle>
+                <CardDescription>
+                  Give the model a live <code className="text-xs bg-muted px-1 py-0.5 rounded">web_search</code> tool.
+                  Choose a provider and add its API key — the model calls it automatically when it needs current information.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="web-search-enabled">Enable web search</Label>
+                  <div className="flex items-center space-x-2">
+                    <Label htmlFor="web-search-enabled" className="text-sm font-normal text-muted-foreground">
+                      {settings.webSearchEnabled ? 'Enabled' : 'Disabled'}
+                    </Label>
+                    <Switch
+                      id="web-search-enabled"
+                      checked={settings.webSearchEnabled || false}
+                      onChange={(e) => handleToggleChange('webSearchEnabled', e.target.checked)}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Provider</Label>
+                  <Select
+                    value={settings.webSearchProvider || 'tavily'}
+                    onValueChange={(value) => handleSelectChange('webSearchProvider', value)}
+                    disabled={!settings.webSearchEnabled}
+                  >
+                    <SelectTrigger className={!settings.webSearchEnabled ? 'opacity-50' : ''}>
+                      <SelectValue placeholder="Select search provider" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="tavily">Tavily</SelectItem>
+                      <SelectItem value="firecrawl">Firecrawl</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {(settings.webSearchProvider || 'tavily') === 'tavily' ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="tavily-api-key">Tavily API Key</Label>
+                    <Input
+                      type="password"
+                      id="tavily-api-key"
+                      name="TAVILY_API_KEY"
+                      value={settings.TAVILY_API_KEY || ''}
+                      onChange={handleChange}
+                      placeholder="tvly-..."
+                      disabled={!settings.webSearchEnabled}
+                      className={!settings.webSearchEnabled ? 'opacity-50' : ''}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Get a key at <code className="text-xs bg-muted px-1 py-0.5 rounded">app.tavily.com</code>. Or set <code className="text-xs bg-muted px-1 py-0.5 rounded">TAVILY_API_KEY</code> in your environment.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <Label htmlFor="firecrawl-api-key">Firecrawl API Key</Label>
+                    <Input
+                      type="password"
+                      id="firecrawl-api-key"
+                      name="FIRECRAWL_API_KEY"
+                      value={settings.FIRECRAWL_API_KEY || ''}
+                      onChange={handleChange}
+                      placeholder="fc-..."
+                      disabled={!settings.webSearchEnabled}
+                      className={!settings.webSearchEnabled ? 'opacity-50' : ''}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Get a key at <code className="text-xs bg-muted px-1 py-0.5 rounded">firecrawl.dev</code>. Or set <code className="text-xs bg-muted px-1 py-0.5 rounded">FIRECRAWL_API_KEY</code> in your environment.
+                    </p>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <Label htmlFor="web-search-max-results">Max results</Label>
+                  <Input
+                    type="number"
+                    id="web-search-max-results"
+                    name="webSearchMaxResults"
+                    min={1}
+                    max={20}
+                    value={settings.webSearchMaxResults ?? 5}
+                    onChange={handleChange}
+                    disabled={!settings.webSearchEnabled}
+                    className={!settings.webSearchEnabled ? 'opacity-50' : ''}
+                  />
+                </div>
+
+                {(settings.webSearchProvider || 'tavily') === 'tavily' && (
+                  <div className="space-y-2">
+                    <Label>Search depth</Label>
+                    <Select
+                      value={settings.webSearchDepth || 'basic'}
+                      onValueChange={(value) => handleSelectChange('webSearchDepth', value)}
+                      disabled={!settings.webSearchEnabled}
+                    >
+                      <SelectTrigger className={!settings.webSearchEnabled ? 'opacity-50' : ''}>
+                        <SelectValue placeholder="Select depth" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="basic">Basic (faster, cheaper)</SelectItem>
+                        <SelectItem value="advanced">Advanced (deeper)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </CardContent>
             </Card>
 

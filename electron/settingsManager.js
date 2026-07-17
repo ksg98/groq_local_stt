@@ -55,7 +55,16 @@ function loadSettings() {
             sttModelLocal: 'mlx-community/whisper-large-v3-turbo',
             ttsProvider: 'kokoro',
             ttsOpenaiModel: 'gpt-4o-mini-tts',
-            ttsOpenaiVoice: 'alloy'
+            ttsOpenaiVoice: 'alloy',
+            webSearchEnabled: false,
+            webSearchProvider: 'tavily',
+            TAVILY_API_KEY: process.env.TAVILY_API_KEY || '',
+            FIRECRAWL_API_KEY: process.env.FIRECRAWL_API_KEY || '',
+            webSearchMaxResults: 5,
+            webSearchDepth: 'basic',
+            webSearchIncludeAnswer: true,
+            webSearchTavilyBaseUrl: '',
+            webSearchFirecrawlBaseUrl: ''
         };
     }
     const userDataPath = appInstance.getPath('userData');
@@ -105,7 +114,16 @@ function loadSettings() {
         sttModelLocal: 'mlx-community/whisper-large-v3-turbo',
         ttsProvider: 'kokoro',
         ttsOpenaiModel: 'gpt-4o-mini-tts',
-        ttsOpenaiVoice: 'alloy'
+        ttsOpenaiVoice: 'alloy',
+        webSearchEnabled: false,
+        webSearchProvider: 'tavily',
+        TAVILY_API_KEY: process.env.TAVILY_API_KEY || '',
+        FIRECRAWL_API_KEY: process.env.FIRECRAWL_API_KEY || '',
+        webSearchMaxResults: 5,
+        webSearchDepth: 'basic',
+        webSearchIncludeAnswer: true,
+        webSearchTavilyBaseUrl: '',
+        webSearchFirecrawlBaseUrl: ''
     };
 
     try {
@@ -136,6 +154,10 @@ function loadSettings() {
             } else {
                 settings.OPENAI_API_KEY = settings.OPENAI_API_KEY || defaultSettings.OPENAI_API_KEY;
             }
+
+            // Web search API keys (env vars take precedence)
+            settings.TAVILY_API_KEY = process.env.TAVILY_API_KEY || settings.TAVILY_API_KEY || defaultSettings.TAVILY_API_KEY;
+            settings.FIRECRAWL_API_KEY = process.env.FIRECRAWL_API_KEY || settings.FIRECRAWL_API_KEY || defaultSettings.FIRECRAWL_API_KEY;
 
             settings.model = settings.model || defaultSettings.model;
             settings.temperature = settings.temperature ?? defaultSettings.temperature; // Use nullish coalescing

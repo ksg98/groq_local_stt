@@ -41,6 +41,8 @@ const { getProviderModels, getAudioModels, fetchLocalModelInfo } = require('../s
 // Import handlers
 const chatHandler = require('./chatHandler');
 const toolHandler = require('./toolHandler');
+const webSearchHandler = require('./webSearchHandler');
+const { initAutoUpdater } = require('./autoUpdater');
 
 // Import new manager modules
 const { initializeSettingsHandlers, loadSettings, saveSettings } = require('./settingsManager');
@@ -373,6 +375,9 @@ app.whenReady().then(async () => {
     mainWindow = null;
   });
 
+  // Start checking GitHub Releases for updates (no-op in dev)
+  initAutoUpdater(mainWindow);
+
   // Send pending context to renderer if available
   if (pendingContext) {
     mainWindow.webContents.once('did-finish-load', () => {
@@ -472,7 +477,10 @@ app.whenReady().then(async () => {
     // Merge API models with custom models from settings
     const mergedModelContextSizes = getModelContextSizes(currentSettings.customModels || {}, apiModels, providerModels);
 
-    chatHandler.handleChatStream(event, messages, model, currentSettings, mergedModelContextSizes, discoveredTools, options || {});
+    // Add the built-in web search tool (Firecrawl/Tavily) when enabled in settings
+    const allTools = [...discoveredTools, ...webSearchHandler.getWebSearchTools(currentSettings)];
+
+    chatHandler.handleChatStream(event, messages, model, currentSettings, mergedModelContextSizes, allTools, options || {});
   });
 
   // Stop chat stream
@@ -487,6 +495,10 @@ app.whenReady().then(async () => {
   console.log("[Main Init] Registering execute-tool-call...");
   ipcMain.handle('execute-tool-call', async (event, toolCall) => {
     const currentSettings = loadSettings();
+    // Built-in web search runs in-process, bypassing the MCP client path
+    if (webSearchHandler.isWebSearchTool(toolCall?.function?.name)) {
+      return webSearchHandler.executeWebSearch(toolCall, currentSettings);
+    }
     const { discoveredTools, mcpClients } = mcpManager.getMcpState(); // Use module object
     return toolHandler.handleExecuteToolCall(event, toolCall, discoveredTools, mcpClients, currentSettings);
   });
