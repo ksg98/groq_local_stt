@@ -8,7 +8,7 @@
 // work fine unsigned — and then perform the install ourselves by swapping the
 // .app bundle from a detached script. Windows/Linux keep the built-in installer.
 
-const { app, dialog, shell } = require('electron');
+const { app, dialog, shell, BrowserWindow } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const fs = require('fs');
 const os = require('os');
@@ -106,6 +106,19 @@ function initAutoUpdater(mainWindow) {
         } catch { /* window may be gone */ }
     };
 
+    // The window captured at init is destroyed once the user closes it, and a
+    // dialog parented to a destroyed window never appears (on macOS it would be
+    // a sheet attached to nothing). Re-resolve a live window each time, and fall
+    // back to an app-modal dialog when there is none.
+    const showDialog = (options) => {
+        let parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+        if (!parent) {
+            parent = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed()) || null;
+        }
+        app.focus({ steal: true }); // otherwise it can sit unnoticed behind other apps
+        return parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options);
+    };
+
     autoUpdater.on('update-available', (info) => {
         console.log(`[AutoUpdater] Update available: ${info.version}`);
         send('update-status', { state: 'available', version: info.version });
@@ -123,7 +136,7 @@ function initAutoUpdater(mainWindow) {
     autoUpdater.on('update-downloaded', async (info) => {
         console.log(`[AutoUpdater] Update downloaded: ${info.version}`);
         send('update-status', { state: 'downloaded', version: info.version });
-        const { response } = await dialog.showMessageBox(mainWindow, {
+        const { response } = await showDialog({
             type: 'info',
             buttons: ['Restart now', 'Later'],
             defaultId: 0,
@@ -145,7 +158,7 @@ function initAutoUpdater(mainWindow) {
             setImmediate(() => app.quit());
         } catch (e) {
             console.error('[AutoUpdater] Self-install failed:', e.message);
-            const { response: r } = await dialog.showMessageBox(mainWindow, {
+            const { response: r } = await showDialog({
                 type: 'warning',
                 buttons: ['Open download page', 'Later'],
                 defaultId: 0,
@@ -164,7 +177,7 @@ function initAutoUpdater(mainWindow) {
         send('update-status', { state: 'error', message: msg });
         // Unsigned macOS builds can't self-install — offer a manual download.
         if (process.platform === 'darwin' && /signature|code sign/i.test(msg)) {
-            dialog.showMessageBox(mainWindow, {
+            showDialog({
                 type: 'info',
                 buttons: ['Open download page', 'Later'],
                 defaultId: 0,
