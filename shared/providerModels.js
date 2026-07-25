@@ -17,6 +17,13 @@ const https = require('https');
 
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
+// Effort discovery: an invalid level the server will reject, so its validation
+// error lists the levels it does accept. Never generates tokens.
+const EFFORT_PROBE_SENTINEL = '__effort_probe__';
+const EFFORT_PROBE_TIMEOUT_MS = 8000;
+// Ids that are clearly not chat models — never probed.
+const NON_CHAT_PATTERNS = ['image', 'embedding', 'whisper', 'tts', 'audio', 'moderation', 'transcribe', 'dall-e'];
+
 // Effort levels Anthropic's Models API reports under capabilities.effort
 const ANTHROPIC_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
@@ -177,6 +184,82 @@ async function fetchChatgptModels({ token, accountId }) {
 // served through the Groq chat-completions path with the local base URL.
 const LOCAL_MODEL_PREFIX = 'local:';
 
+// Effort levels reported by the server itself, if it publishes them. The plain
+// OpenAI /v1/models shape carries only ids, but richer OpenAI-compatible
+// servers expose capability metadata — prefer that over any local inference.
+// Accepts a bare string array or objects with an `effort`/`level`/`name` field.
+function serverReportedEfforts(model) {
+  if (!model || typeof model !== 'string') {
+    const raw =
+      model?.supported_reasoning_levels ??
+      model?.supported_reasoning_efforts ??
+      model?.reasoning?.efforts ??
+      model?.reasoning_efforts;
+    if (Array.isArray(raw)) {
+      const efforts = raw
+        .map((l) => (typeof l === 'string' ? l : l?.effort || l?.level || l?.name))
+        .filter((l) => typeof l === 'string' && l);
+      if (efforts.length) return efforts;
+    }
+  }
+  return null;
+}
+
+// Fallback when the server publishes no capability metadata: infer effort
+// levels from the id it reports (e.g. a Codex CLI proxy serving gpt-5.x).
+// Returns null for non-reasoning models, which then show no effort selector.
+function localEffortsForModel(id) {
+  const lower = String(id).toLowerCase();
+  if (lower.includes('codex')) {
+    // Matches the codex entries in MODEL_CATALOG: no 'none' level
+    const minor = parseInt((lower.match(/gpt-5\.(\d+)/) || [])[1] || '0', 10);
+    return minor >= 2 ? ['low', 'medium', 'high', 'xhigh'] : ['low', 'medium', 'high'];
+  }
+  if (lower.includes('gpt-oss')) return ['low', 'medium', 'high'];
+  return openAIEffortsForModel(lower);
+}
+
+// Ask the server which effort levels a model actually accepts, by sending a
+// deliberately invalid level and reading them out of the validation error
+// (e.g. `level "x" not supported, valid levels: low, medium, high, xhigh, max`).
+// The request always fails validation, so it generates no tokens. Returns null
+// when the server doesn't validate or doesn't answer in that shape.
+async function probeEffortLevels(baseUrl, apiKey, modelId) {
+  const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), EFFORT_PROBE_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(apiKey && apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : {}),
+      },
+      body: JSON.stringify({
+        model: modelId,
+        messages: [{ role: 'user', content: 'x' }],
+        reasoning_effort: EFFORT_PROBE_SENTINEL,
+        max_completion_tokens: 1,
+      }),
+    });
+    // A success means the server ignored the bogus value — it tells us nothing.
+    if (response.ok) return null;
+    const message = (await response.json())?.error?.message || '';
+    const match = message.match(/valid levels?:\s*([^.\n]+)/i);
+    if (!match) return null;
+    const levels = match[1]
+      .split(',')
+      .map((l) => l.trim().replace(/^["']|["']$/g, ''))
+      .filter(Boolean);
+    return levels.length ? levels : null;
+  } catch {
+    return null; // offline, timeout, non-JSON — fall back to inference
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchLocalLlmModels(baseUrl, apiKey) {
   const url = `${baseUrl.replace(/\/+$/, '')}/models`;
   const response = await fetch(url, {
@@ -187,10 +270,30 @@ async function fetchLocalLlmModels(baseUrl, apiKey) {
   }
   const json = await response.json();
   const list = Array.isArray(json?.data) ? json.data : Array.isArray(json) ? json : [];
+  const entries = list
+    .map((m) => ({ meta: m, id: typeof m === 'string' ? m : m?.id }))
+    .filter((e) => e.id);
+
+  // Effort levels, most authoritative source first:
+  //   1. metadata the server publishes alongside the model
+  //   2. the server's own validation error (asked live, per model id)
+  //   3. inference from the id, when the server tells us nothing
+  const resolved = await Promise.all(
+    entries.map(async ({ meta, id }) => {
+      const published = serverReportedEfforts(meta);
+      if (published) return { id, efforts: published };
+      const lower = id.toLowerCase();
+      if (NON_CHAT_PATTERNS.some((p) => lower.includes(p))) return { id, efforts: null };
+      const probed = await probeEffortLevels(baseUrl, apiKey, id);
+      // A server that accepts 'none' can turn thinking off entirely; it is
+      // commonly omitted from the advertised list, so offer it up front.
+      if (probed) return { id, efforts: probed.includes('none') ? probed : ['none', ...probed] };
+      return { id, efforts: localEffortsForModel(id) };
+    })
+  );
+
   const models = {};
-  for (const m of list) {
-    const id = typeof m === 'string' ? m : m?.id;
-    if (!id) continue;
+  for (const { id, efforts } of resolved) {
     models[`${LOCAL_MODEL_PREFIX}${id}`] = {
       displayName: `${id} (Local)`,
       context: 32768, // /v1/models doesn't report context; override via Custom Models if needed
@@ -198,7 +301,7 @@ async function fetchLocalLlmModels(baseUrl, apiKey) {
       builtin_tools_supported: false,
       provider: 'local',
       max_tokens_default: 8192,
-      reasoning: null,
+      reasoning: efforts && efforts.length ? { supported: true, mode: 'effort', efforts } : null,
     };
   }
   if (Object.keys(models).length === 0) {

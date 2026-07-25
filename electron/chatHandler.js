@@ -190,7 +190,7 @@ function cleanMessages(messages) {
     });
 }
 
-function buildApiParams(prunedMessages, modelToUse, settings, tools, modelContextSizes) {
+function buildApiParams(prunedMessages, modelToUse, settings, tools, modelContextSizes, options = {}) {
     // Get current date/time with timezone
     const now = new Date();
     const dateTimeString = now.toLocaleString('en-US', { 
@@ -247,8 +247,24 @@ function buildApiParams(prunedMessages, modelToUse, settings, tools, modelContex
         stream: true
     };
 
-    // Add reasoning_effort parameter for gpt-oss models
-    if (modelToUse.includes('gpt-oss') && settings.reasoning_effort) {
+    // Reasoning effort. Sent for any model whose catalog entry declares effort
+    // support (gpt-oss on Groq, plus local/OpenAI-compatible endpoints such as a
+    // Codex CLI proxy serving gpt-5.x). The per-request effort from the UI wins
+    // over the saved setting; 'none' means omit the param entirely.
+    const modelEntry = modelContextSizes?.[modelToUse];
+    const supportedEfforts = modelEntry?.reasoning?.efforts;
+    if (supportedEfforts && supportedEfforts.length) {
+        let effort = options.reasoningEffort || settings.reasoning_effort;
+        if (effort && !supportedEfforts.includes(effort)) {
+            effort = supportedEfforts.includes('medium') ? 'medium' : supportedEfforts[0];
+        }
+        // 'none' is a real value on these endpoints — it disables thinking.
+        // Omitting it would silently fall back to the model's default effort.
+        if (effort) {
+            apiParams.reasoning_effort = effort;
+        }
+    } else if (modelToUse.includes('gpt-oss') && settings.reasoning_effort) {
+        // Fallback for gpt-oss when the catalog entry carries no reasoning info
         apiParams.reasoning_effort = settings.reasoning_effort;
     }
 
@@ -1577,7 +1593,7 @@ async function handleChatStream(event, messages, model, settings, modelContextSi
         const tools = prepareTools(discoveredTools);
         const cleanedMessages = cleanMessages(messages);
         const prunedMessages = pruneMessageHistory(cleanedMessages, modelToUse, modelContextSizes);
-        const chatCompletionParams = buildApiParams(prunedMessages, modelToUse, settings, tools, modelContextSizes);
+        const chatCompletionParams = buildApiParams(prunedMessages, modelToUse, settings, tools, modelContextSizes, options);
         if (isLocalModel) {
             // The server knows the model by its raw id, without our namespace
             chatCompletionParams.model = modelToUse.slice(LOCAL_MODEL_PREFIX.length);
