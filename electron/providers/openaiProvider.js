@@ -1,6 +1,7 @@
 const OpenAI = require('openai');
 const chatgptAuthManager = require('../chatgptAuthManager');
 const { CHATGPT_MODEL_PREFIX } = require('../../shared/providerModels');
+const { sanitizeToolSchema } = require('../toolSchema');
 
 // ChatGPT subscription transport: Responses API served from the ChatGPT
 // backend (Codex endpoint). api.openai.com rejects ChatGPT OAuth tokens.
@@ -108,11 +109,15 @@ function convertTools(discoveredTools) {
 
   return discoveredTools.map((tool) => {
     const fn = tool.function || tool;
+    // MCP tools carry `input_schema`; already-converted ones carry `parameters`.
+    // Missing this is why tools used to arrive with an empty parameter list.
+    const { schema, strictSafe } = sanitizeToolSchema(fn.parameters || fn.input_schema);
     return {
       type: 'function',
       name: fn.name || tool.name,
       description: fn.description || tool.description || '',
-      parameters: fn.parameters || { type: 'object', properties: {} },
+      strict: strictSafe,
+      parameters: schema,
     };
   });
 }

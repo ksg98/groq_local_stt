@@ -7,6 +7,7 @@ const { supportsBuiltInTools } = require('../shared/models');
 const { LOCAL_MODEL_PREFIX } = require('../shared/providerModels');
 const googleOAuthManager = require('./googleOAuthManager');
 const { routeToProvider } = require('./providers/providerRouter');
+const { sanitizeToolSchema } = require('./toolSchema');
 
 // Track active streams to allow cancellation
 const activeStreams = new Map();
@@ -73,46 +74,11 @@ function prepareTools(discoveredTools, isResponsesApi = false) {
             console.warn('[ChatHandler] Warning: Tool missing name:', tool);
         }
 
-        // Sanitize schema: Reconstruction Strategy
-        // Instead of copying, we rebuild the schema from scratch with only known-safe fields.
-        let safeSchema = {
-            type: "object",
-            properties: {}
-            // Removed 'required' init here to add it only if needed
-            // Removed 'additionalProperties' to be less strict/prone to validation errors
-        };
-
-        if (tool.input_schema) {
-             try {
-                 const schema = tool.input_schema;
-                 
-
-                 // Rebuild properties
-                 if (schema.properties && typeof schema.properties === 'object' && schema.properties !== null) {
-                     for (const [key, value] of Object.entries(schema.properties)) {
-                         if (value && typeof value === 'object') {
-                             // Only copy specific allowed fields for property definition
-                             safeSchema.properties[key] = {};
-                             if (value.type) safeSchema.properties[key].type = value.type;
-                             if (value.description) safeSchema.properties[key].description = value.description;
-                             if (value.enum) safeSchema.properties[key].enum = value.enum;
-                             // Helper for integer/number constraints
-                             if (value.minimum !== undefined) safeSchema.properties[key].minimum = value.minimum;
-                             if (value.maximum !== undefined) safeSchema.properties[key].maximum = value.maximum;
-                         }
-                     }
-                 }
-
-                 // Rebuild required only if it has items
-                 if (Array.isArray(schema.required) && schema.required.length > 0) {
-                     safeSchema.required = [...schema.required];
-                 }
-
-             } catch (e) {
-                 console.error('[ChatHandler] Error sanitizing tool schema:', e);
-                 safeSchema = { type: "object", properties: {} };
-             }
-        }
+        // Rebuild the schema from a known-safe subset of keywords. `strict` is
+        // stated explicitly (the Responses API defaults it to true) and is only
+        // true when the schema can actually satisfy strict mode — every property
+        // required, additionalProperties:false — else providers reject the tool.
+        const { schema: safeSchema, strictSafe } = sanitizeToolSchema(tool.input_schema);
 
         if (isResponsesApi) {
             // Groq Responses API (beta) expects a flat structure
@@ -120,7 +86,7 @@ function prepareTools(discoveredTools, isResponsesApi = false) {
                 type: "function",
                 name: tool.name || "unknown_tool",
                 description: tool.description || "",
-                strict: true,
+                strict: strictSafe,
                 parameters: safeSchema
             };
         } else {
@@ -130,7 +96,7 @@ function prepareTools(discoveredTools, isResponsesApi = false) {
                 function: {
                     name: tool.name || "unknown_tool",
                     description: tool.description || "",
-                    strict: true,
+                    strict: strictSafe,
                     parameters: safeSchema
                 }
             };

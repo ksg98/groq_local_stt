@@ -41,15 +41,22 @@ function ToolCall({ toolCall, toolResult }) {
   const { function: func, server_label } = toolCall;
   const functionName = func.name;
   const formattedName = formatFunctionName(functionName);
-  let args = {};
-  try {
-    args = JSON.parse(func.arguments || '{}');
-  } catch (e) {
-    console.error("Failed to parse tool call arguments:", func.arguments, e);
-    args = { parse_error: "Could not parse arguments", original_arguments: func.arguments };
-  }
-
   const isPending = toolResult === null || toolResult === undefined;
+
+  // Arguments stream in token by token, so mid-stream they are an incomplete
+  // JSON fragment (`{"`). Show the raw text until it parses instead of treating
+  // a partial payload as an error.
+  const rawArgs = func.arguments || '';
+  let args = null;
+  try {
+    args = rawArgs.trim() ? JSON.parse(rawArgs) : {};
+  } catch (e) {
+    // Only a finished call with unparseable arguments is a real problem.
+    if (!isPending) {
+      console.error("Failed to parse tool call arguments:", rawArgs, e);
+    }
+  }
+  const displayArgs = args === null ? rawArgs : JSON.stringify(args, null, 2);
 
   return (
     <div className="tool-call-container w-fit max-w-full">
@@ -99,7 +106,7 @@ function ToolCall({ toolCall, toolResult }) {
                 }}
                 wrapLongLines={true}
               >
-                {JSON.stringify(args, null, 2)}
+                {displayArgs}
               </SyntaxHighlighter>
             </div>
 
