@@ -1,5 +1,12 @@
 const fs = require('fs');
 const path = require('path');
+const { nativeTheme } = require('electron');
+
+// Keep native UI (menus, vibrancy, dialogs) in step with the app theme
+function syncNativeTheme(settings) {
+    const theme = settings?.theme;
+    nativeTheme.themeSource = theme === 'light' || theme === 'dark' ? theme : 'system';
+}
 
 // Load environment variables from .env file
 require('dotenv').config();
@@ -64,7 +71,8 @@ function loadSettings() {
             webSearchDepth: 'basic',
             webSearchIncludeAnswer: true,
             webSearchTavilyBaseUrl: '',
-            webSearchFirecrawlBaseUrl: ''
+            webSearchFirecrawlBaseUrl: '',
+            theme: 'system'
         };
     }
     const userDataPath = appInstance.getPath('userData');
@@ -221,6 +229,8 @@ function initializeSettingsHandlers(ipcMain, app) {
     console.log('SettingsManager Initialized. Settings file location:', settingsPath);
     console.log('Settings file exists:', fs.existsSync(settingsPath));
 
+    syncNativeTheme(loadSettings());
+
     // Handler for getting settings
     ipcMain.handle('get-settings', async () => {
         return loadSettings();
@@ -256,6 +266,7 @@ function initializeSettingsHandlers(ipcMain, app) {
             }
             // Optionally add more validation here
             fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+            syncNativeTheme(settings);
             return { success: true };
         } catch (error) {
             console.error('Error saving settings:', error);

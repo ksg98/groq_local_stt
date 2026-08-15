@@ -26,7 +26,7 @@ const Switch = ({ checked, onChange, id, size = 'default' }) => {
         onChange={onChange}
       />
       <div
-        className={`${sizeConfig.track} ${sizeConfig.circle} ${sizeConfig.translate} bg-gray-200 rounded-full peer peer-focus:ring-2 peer-focus:ring-blue-500 dark:peer-focus:ring-blue-600 dark:bg-gray-700 peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:transition-all dark:border-gray-600 peer-checked:bg-blue-600`}
+        className={`${sizeConfig.track} ${sizeConfig.circle} ${sizeConfig.translate} bg-input rounded-full peer peer-focus:ring-2 peer-focus:ring-ring peer-checked:after:border-primary-foreground after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-primary-foreground after:border-border after:border after:rounded-full after:transition-all peer-checked:bg-primary`}
       ></div>
     </label>
   );

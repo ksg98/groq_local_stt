@@ -22,7 +22,10 @@ export function useMediaCapture({ onError } = {}) {
   };
 
   const stopCapture = useCallback(() => {
-    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current?.getTracks().forEach((track) => {
+      track.removeEventListener('ended', stopCapture);
+      track.stop();
+    });
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
     modeRef.current = null;
@@ -53,6 +56,15 @@ export function useMediaCapture({ onError } = {}) {
         );
       }
       const list = await window.electron.capture.getSources();
+      // macOS with Screen Recording not yet granted returns no sources (or
+      // blank thumbnails) — listing them triggers the system prompt, but the
+      // grant only takes effect after an app restart
+      if (list.length === 0) {
+        window.electron.capture.openScreenSettings();
+        throw new Error(
+          'No screens available. Grant Screen Recording permission in System Settings > Privacy & Security > Screen Recording, then restart the app.'
+        );
+      }
       setSources(list);
       setPickerOpen(true);
     } catch (error) {

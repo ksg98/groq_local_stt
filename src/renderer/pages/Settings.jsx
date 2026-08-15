@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Eye, EyeOff, Plus, Trash2, Edit3, Save, X, RefreshCw, Key, Settings as SettingsIcon, Zap, Cpu, Server, AlertCircle, CheckCircle, Mic, Volume2, Globe } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Plus, Trash2, Edit3, Save, X, RefreshCw, Key, Settings as SettingsIcon, Zap, Cpu, Server, AlertCircle, CheckCircle, Mic, Volume2, Globe, Palette } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -9,6 +9,7 @@ import { Textarea } from '../components/ui/textarea';
 import { Badge } from '../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import Switch from '../components/ui/Switch';
+import { useTheme } from '../hooks/useTheme';
 
 // Make sure the saved model is always selectable, even when the live list
 // hasn't loaded yet or no longer contains it.
@@ -58,7 +59,7 @@ function SidecarStatusRow({ status, onLoad, onUnload }) {
   }
   return (
     <div className="flex items-center justify-between border border-border/50 rounded-lg px-3 py-2">
-      <span className={`text-sm truncate ${state === 'error' ? 'text-red-500' : 'text-muted-foreground'}`}>
+      <span className={`text-sm truncate ${state === 'error' ? 'text-destructive' : 'text-muted-foreground'}`}>
         {state === 'error' ? status?.message || 'Failed to load' : 'Not loaded'}
       </span>
       <Button type="button" variant="outline" size="sm" onClick={onLoad}>
@@ -69,6 +70,8 @@ function SidecarStatusRow({ status, onLoad, onUnload }) {
 }
 
 function Settings() {
+  // Theme is persisted by the hook itself (not the page's debounced save flow)
+  const { theme, setTheme } = useTheme();
   const [settings, setSettings] = useState({
     GROQ_API_KEY: '',
     ANTHROPIC_API_KEY: '',
@@ -1346,7 +1349,7 @@ function Settings() {
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <header className="sticky top-0 z-50 glass">
         <div className="container flex h-16 items-center justify-between px-6">
           <div className="flex items-center space-x-4">
             <Link to="/">
@@ -1382,7 +1385,7 @@ function Settings() {
               saveStatus?.type === 'error'
                 ? 'text-destructive'
                 : saveStatus?.type === 'success'
-                ? 'text-green-600'
+                ? 'text-green-600 dark:text-green-400'
                 : 'text-muted-foreground'
             }`}>
               {saveStatus?.type === 'success' ? (
@@ -1414,6 +1417,46 @@ function Settings() {
                 </CardContent>
               </Card>
             )}
+
+            {/* Appearance */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <Palette className="h-5 w-5 text-primary" />
+                  <span>Appearance</span>
+                </CardTitle>
+                <CardDescription>
+                  Choose the color theme
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Theme</Label>
+                  <Select
+                    value={theme}
+                    onValueChange={(value) => {
+                      // setTheme persists to settings itself; mirror it into the
+                      // page's local settings state so this page's own debounced
+                      // saves (which spread that state) never clobber the key.
+                      setTheme(value);
+                      setSettings(prev => ({ ...prev, theme: value }));
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select theme" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="system">System</SelectItem>
+                      <SelectItem value="light">Light</SelectItem>
+                      <SelectItem value="dark">Dark</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    How Groq Desktop looks. System follows your OS.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
 
             {/* API Settings */}
             <Card>
@@ -1885,7 +1928,7 @@ function Settings() {
                     </SelectContent>
                   </Select>
                   {sttProvider === 'openai' && !openaiKeySet && (
-                    <p className="text-xs text-amber-500">
+                    <p className="text-xs text-amber-600 dark:text-amber-400">
                       Requires the OpenAI API key above.
                     </p>
                   )}
@@ -1905,7 +1948,7 @@ function Settings() {
                 {sttProvider === 'local' && (
                   audioModels && audioModels.localSupported === false ? (
                     <div className="flex items-center gap-2 border border-amber-500/30 bg-amber-500/10 rounded-lg px-3 py-2">
-                      <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
+                      <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
                       <span className="text-sm">
                         Local Whisper needs Apple Silicon and uv (docs.astral.sh/uv).
                       </span>
@@ -1922,7 +1965,7 @@ function Settings() {
                         whisperStatus.model &&
                         settings.sttModelLocal &&
                         whisperStatus.model !== settings.sttModelLocal && (
-                          <p className="text-xs text-amber-500">
+                          <p className="text-xs text-amber-600 dark:text-amber-400">
                             A different model is loaded — click Load to switch to the selected one.
                           </p>
                         )}
@@ -1932,7 +1975,7 @@ function Settings() {
                           variant="outline"
                           size="sm"
                           onClick={() => handleDeleteLocalModel(settings.sttModelLocal)}
-                          className="text-red-500 hover:text-red-600"
+                          className="text-destructive hover:text-destructive/80"
                         >
                           <Trash2 className="h-4 w-4 mr-2" />
                           Delete download
@@ -1976,12 +2019,12 @@ function Settings() {
                     </SelectContent>
                   </Select>
                   {ttsProvider === 'kokoro' && audioModels && audioModels.kokoroSupported === false && (
-                    <p className="text-xs text-amber-500">
+                    <p className="text-xs text-amber-600 dark:text-amber-400">
                       Kokoro needs Apple Silicon and uv — pick OpenAI instead on this machine.
                     </p>
                   )}
                   {ttsProvider === 'openai' && !openaiKeySet && (
-                    <p className="text-xs text-amber-500">
+                    <p className="text-xs text-amber-600 dark:text-amber-400">
                       Requires the OpenAI API key above.
                     </p>
                   )}
@@ -2001,7 +2044,7 @@ function Settings() {
                         variant="outline"
                         size="sm"
                         onClick={() => handleDeleteLocalModel(audioModels.kokoroModelId)}
-                        className="text-red-500 hover:text-red-600"
+                        className="text-destructive hover:text-destructive/80"
                       >
                         <Trash2 className="h-4 w-4 mr-2" />
                         Delete download
@@ -2094,7 +2137,7 @@ function Settings() {
                         {googleOAuthStatus?.hasRefreshCapability && (
                           <div className="flex items-center gap-2">
                             {googleOAuthStatus?.expiresInMinutes !== null && (
-                              <span className={`text-xs ${googleOAuthStatus.isExpired ? 'text-red-500' : googleOAuthStatus.expiresInMinutes < 10 ? 'text-yellow-500' : 'text-green-500'}`}>
+                              <span className={`text-xs ${googleOAuthStatus.isExpired ? 'text-destructive' : googleOAuthStatus.expiresInMinutes < 10 ? 'text-yellow-600 dark:text-yellow-400' : 'text-green-600 dark:text-green-400'}`}>
                                 {googleOAuthStatus.isExpired 
                                   ? 'Token expired' 
                                   : `Expires in ${googleOAuthStatus.expiresInMinutes} min`}
@@ -2329,12 +2372,12 @@ function Settings() {
                                         <div className="flex items-center space-x-2">
                                           <Badge variant="secondary" className="text-xs">{config.serverLabel || id}</Badge>
                                           {config.requireApproval === 'always' && (
-                                            <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700">
+                                            <Badge variant="outline" className="text-xs bg-yellow-500/10 text-yellow-600 dark:text-yellow-400">
                                               Approval required
                                             </Badge>
                                           )}
                                           {!isEnabled && (
-                                            <Badge variant="outline" className="text-xs bg-gray-100 text-gray-500">
+                                            <Badge variant="outline" className="text-xs bg-muted text-muted-foreground">
                                               Disabled
                                             </Badge>
                                           )}
@@ -2623,7 +2666,7 @@ function Settings() {
                       step="0.01"
                       value={settings.temperature}
                       onChange={handleNumberChange}
-                      className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                      className="w-full h-2 bg-secondary rounded-lg appearance-none cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     />
                     <p className="text-xs text-muted-foreground">
                       Lower values make responses more deterministic, higher values more creative
@@ -2643,7 +2686,7 @@ function Settings() {
                       step="0.01"
                       value={settings.top_p}
                       onChange={handleNumberChange}
-                      className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                      className="w-full h-2 bg-secondary rounded-lg appearance-none cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     />
                     <p className="text-xs text-muted-foreground">
                       Controls diversity by limiting tokens to the most likely ones
@@ -3186,12 +3229,12 @@ function Settings() {
                                     {config.context?.toLocaleString() || '8,192'} tokens
                                   </Badge>
                                   {config.vision_supported && (
-                                    <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700">
+                                    <Badge variant="outline" className="text-xs bg-blue-500/10 text-blue-600 dark:text-blue-400">
                                       Vision
                                     </Badge>
                                   )}
                                   {config.builtin_tools_supported && (
-                                    <Badge variant="outline" className="text-xs bg-green-50 text-green-700">
+                                    <Badge variant="outline" className="text-xs bg-green-500/10 text-green-600 dark:text-green-400">
                                       Built-in Tools
                                     </Badge>
                                   )}
@@ -3298,7 +3341,7 @@ function Settings() {
                             name="vision_supported"
                             checked={newCustomModel.vision_supported}
                             onChange={handleNewCustomModelChange}
-                            className="rounded border-gray-300"
+                            className="rounded border-input accent-primary"
                           />
                           <Label htmlFor="model-vision" className="text-sm font-normal">
                             Supports vision/image inputs
@@ -3311,7 +3354,7 @@ function Settings() {
                             name="builtin_tools_supported"
                             checked={newCustomModel.builtin_tools_supported}
                             onChange={handleNewCustomModelChange}
-                            className="rounded border-gray-300"
+                            className="rounded border-input accent-primary"
                           />
                           <Label htmlFor="model-builtin-tools" className="text-sm font-normal">
                             Supports built-in tools (code interpreter, browser search)

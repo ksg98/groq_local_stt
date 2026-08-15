@@ -3,9 +3,10 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { codeTheme } from '../lib/codeTheme';
 import rehypeKatex from 'rehype-katex';
 import "katex/dist/katex.min.css";
+import MermaidDiagram from './MermaidDiagram';
 
 const newLineRegex = /\n/;
 const newLineAtTheEndRegex = /\n$/;
@@ -34,9 +35,12 @@ const components = {
           // Custom renderer for code blocks to add syntax highlighting
           code({ node, inline, className, children, ...props }) {
             const match = /language-(\w+)/.exec(className || '');
+            if (!inline && match && match[1] === 'mermaid') {
+              return <MermaidDiagram code={String(children).replace(/\n$/, '')} />;
+            }
             return !inline && match ? (
               <SyntaxHighlighter
-                style={oneDark} // Apply the chosen theme
+                style={codeTheme}
                 language={match[1]}
                 PreTag="div"
                 className="rounded-xl"
@@ -85,7 +89,7 @@ const components = {
           td: ({ node: _, children, ...props }) => {
             return (
               <td
-                className="border-r border-gray-200 p-2 font-normal first:border-l text-left text-sm"
+                className="border-r border-border p-2 font-normal first:border-l text-left text-sm"
                 {...props}
               >
                 {children}
@@ -95,7 +99,7 @@ const components = {
           th: ({ node: _, children, ...props }) => {
             return (
               <th
-                className="border-r border-gray-200 p-2 font-medium first:border-l border-t text-left text-sm"
+                className="border-r border-border p-2 font-medium first:border-l border-t text-left text-sm"
                 {...props}
               >
                 {children}
@@ -167,7 +171,7 @@ const components = {
                 {...props}
                 target={"_blank"}
                 rel="noreferrer"
-                className="text-primaryaccent hover:text-[#0AAFC8]"
+                className="text-primary hover:text-primary/80"
               >
                 {children}
               </a>
@@ -193,7 +197,7 @@ function MarkdownRenderer({ content, disableMath = false }) {
   const rehypePlugins = disableMath ? [] : [rehypeKatex];
 
   return (
-    <div className="font-inter text-sm">
+    <div className="markdown-content text-sm">
       <ReactMarkdown
         components={components}
         remarkPlugins={remarkPlugins} // Enable GitHub Flavored Markdown, conditionally enable math

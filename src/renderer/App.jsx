@@ -1356,16 +1356,31 @@ function App() {
   };
 
   // --- Voice agent (Kokoro TTS + Silero VAD) and screenshare/camera capture ---
+  // Surface capture/agent failures in the chat — DevTools-only errors read as
+  // the buttons silently doing nothing
+  const showSessionError = (tag, message) => {
+    console.error(tag, message);
+    setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${message}` }]);
+  };
+
   const capture = useMediaCapture({
-    onError: (message) => console.error('[Capture]', message),
+    onError: (message) => showSessionError('[Capture]', message),
   });
   captureRef.current = capture;
+
+  const handleVisionRequired = () => {
+    const modelName = modelConfigs?.[selectedModel]?.displayName || selectedModel;
+    showSessionError(
+      '[Capture]',
+      `${modelName} can't see images. Switch to a vision-capable model (e.g. Llama 4 Scout or Maverick) to share your screen or camera.`
+    );
+  };
 
   const voiceAgent = useVoiceAgent({
     onTranscript: (text) => handleSendMessage(text),
     onStopGeneration: handleStopGeneration,
     loadingRef,
-    onError: (message) => console.error('[VoiceAgent]', message),
+    onError: (message) => showSessionError('[VoiceAgent]', message),
   });
   voiceAgentRef.current = voiceAgent;
 
@@ -1798,7 +1813,7 @@ function App() {
     }
   }, [useResponsesApi]);
   return (
-    <div className="flex h-screen bg-background">
+    <div className="flex h-screen">
       {/* Chat History Sidebar */}
       <ChatHistorySidebar 
         onNewChat={handleNewChat}
@@ -1809,7 +1824,7 @@ function App() {
       {/* Main Content Area */}
       <div className="flex flex-col flex-1 min-w-0">
         {/* Modern Sticky Header */}
-        <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur-sm supports-[backdrop-filter]:bg-background/80 shadow-sm">
+        <header className="sticky top-0 z-50 glass">
           <div className="flex h-14 items-center justify-between px-4 max-w-full">
             <div className="flex items-center space-x-3">
               {/* Sidebar toggle for mobile/collapsed state */}
@@ -1835,7 +1850,7 @@ function App() {
               
               {/* Status Badge */}
               {mcpTools.length > 0 && (
-                <Badge variant="secondary" className="bg-[#E9E9DF] hover:bg-[#E9E9DF]">
+                <Badge variant="secondary" className="bg-secondary hover:bg-accent">
                   <Zap className="w-3 h-3 mr-1" />
                   {mcpTools.length} tools
                 </Badge>
@@ -1843,7 +1858,7 @@ function App() {
               
               {/* API Mode Indicator */}
               <span 
-                className="text-xs text-muted-foreground/60 flex items-center gap-1 cursor-default" 
+                className="text-xs text-muted-foreground flex items-center gap-1 cursor-default"
                 title={useResponsesApi ? "Using Responses API (supports agentic features)" : "Using Chat Completions API"}
               >
                 {useResponsesApi ? (
@@ -1918,6 +1933,7 @@ function App() {
                     onReasoningEffortChange={setReasoningEffort}
                     voiceAgent={voiceAgent}
                     capture={capture}
+                    onVisionRequired={handleVisionRequired}
                   />
                 </div>
               </div>
@@ -1940,7 +1956,7 @@ function App() {
                   <div ref={messagesEndRef} />
                 </div>
                 
-                <div className="flex-shrink-0 bg-background/95 backdrop-blur pt-6">
+                <div className="flex-shrink-0 pt-6">
                   <ChatInput
                     onSendMessage={handleSendMessage}
                     onStopGeneration={handleStopGeneration}
@@ -1955,6 +1971,7 @@ function App() {
                     onReasoningEffortChange={setReasoningEffort}
                     voiceAgent={voiceAgent}
                     capture={capture}
+                    onVisionRequired={handleVisionRequired}
                   />
                 </div>
               </div>

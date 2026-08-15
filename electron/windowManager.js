@@ -1,4 +1,12 @@
 const path = require('path');
+const { nativeTheme } = require('electron');
+const { registerScreenshotShortcut } = require('./captureHandler');
+
+// Matches the renderer's --background token so the window never flashes the
+// wrong color before the renderer paints
+function themeBackgroundColor() {
+  return nativeTheme.shouldUseDarkColors ? '#121316' : '#F1F1EC';
+}
 
 let mainWindow; // Store the main window instance
 
@@ -20,6 +28,7 @@ function createWindow(screen, BrowserWindow) {
     height: windowHeight,
     x: x,
     y: y,
+    backgroundColor: themeBackgroundColor(),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -39,6 +48,9 @@ function createWindow(screen, BrowserWindow) {
   if (process.env.NODE_ENV === 'development') {
     mainWindow.webContents.openDevTools();
   }
+
+  // Cmd/Ctrl+H attaches a screenshot of what's behind the window to the chat
+  registerScreenshotShortcut(mainWindow);
 
   mainWindow.on('closed', () => {
     mainWindow = null;

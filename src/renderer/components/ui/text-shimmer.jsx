@@ -14,8 +14,8 @@ const TextShimmer = ({
       style={{
         '--spread': spread,
         '--duration': `${duration}s`,
-        '--base-color': 'rgba(55, 65, 81, 1)',
-        '--base-gradient-color': 'rgba(209, 213, 219, 1)',
+        '--base-color': 'hsl(var(--muted-foreground))',
+        '--base-gradient-color': 'hsl(var(--foreground))',
       }}
       {...props}
     >

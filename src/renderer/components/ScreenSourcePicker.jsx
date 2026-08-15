@@ -4,11 +4,11 @@ import React from 'react';
 function ScreenSourcePicker({ sources = [], onSelect, onClose }) {
 	return (
 		<div
-			className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-6"
+			className="fixed inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-50 p-6"
 			onClick={onClose}
 		>
 			<div
-				className="bg-[#E9E9DF] border border-[#CBCDC2] rounded-2xl p-4 max-w-3xl w-full max-h-[80vh] overflow-y-auto shadow-xl"
+				className="glass-card rounded-2xl p-4 max-w-3xl w-full max-h-[80vh] overflow-y-auto"
 				onClick={(e) => e.stopPropagation()}
 			>
 				<div className="flex items-center justify-between mb-3">
@@ -26,7 +26,7 @@ function ScreenSourcePicker({ sources = [], onSelect, onClose }) {
 						<button
 							key={source.id}
 							onClick={() => onSelect(source.id)}
-							className="text-left rounded-xl border border-border/40 bg-white/40 hover:border-primary hover:shadow-md transition-all overflow-hidden"
+							className="text-left rounded-xl border border-border/40 bg-card/60 hover:border-primary hover:shadow-md transition-all overflow-hidden"
 							title={source.name}
 						>
 							<img

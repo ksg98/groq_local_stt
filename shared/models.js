@@ -1,4 +1,4 @@
-const { ANTHROPIC_MODELS, OPENAI_MODELS, getProviderForModel } = require('./providerModels');
+const { ANTHROPIC_MODELS, OPENAI_MODELS, getProviderForModel, visionForModelName } = require('./providerModels');
 
 // Default fallback model configuration
 const DEFAULT_MODEL_CONFIG = {
@@ -24,8 +24,8 @@ function applyModelHeuristics(modelId, apiModelData) {
   // Heuristic: 'gpt-oss' in name = supports builtin tools
   const builtin_tools_supported = modelName.includes('gpt-oss');
   
-  // Heuristic: 'llama-4' in name = supports vision
-  const vision_supported = modelName.includes('llama-4');
+  // Vision inferred from the model name (Groq's /v1/models has no capability info)
+  const vision_supported = visionForModelName(modelName);
   
   return {
     context,

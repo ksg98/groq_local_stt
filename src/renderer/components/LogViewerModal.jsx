@@ -1,23 +1,25 @@
 import React, { useState, useEffect, useRef } from 'react';
 import AnsiToHtml from 'ansi-to-html';
 
+// ANSI colors render as inline styles, so they can't switch with the theme.
+// Use mid-tone values that stay legible on bg-muted in both light and dark mode.
 const converter = new AnsiToHtml({ newline: true, colors: {
-    0: '#000', // black
-    1: '#B00', // red
-    2: '#0B0', // green
-    3: '#FFB86C', // yellow (using a slightly more readable orange/yellow)
-    4: '#61AFEF', // blue
-    5: '#D556B1', // magenta
-    6: '#56B6C2', // cyan
-    7: '#ABB2BF', // white (light gray)
-    8: '#5C6370', // bright black (dark gray)
-    9: '#E06C75', // bright red
-    10: '#98C379', // bright green
-    11: '#E5C07B', // bright yellow
-    12: '#61AFEF', // bright blue (same as blue for better contrast)
-    13: '#C678DD', // bright magenta
-    14: '#56B6C2', // bright cyan (same as cyan)
-    15: '#FFFFFF'  // bright white
+    0: '#6B7280', // black (mid gray so it survives dark surfaces)
+    1: '#DC2626', // red
+    2: '#16A34A', // green
+    3: '#B45309', // yellow (amber, readable on light surfaces)
+    4: '#3B82F6', // blue
+    5: '#C026D3', // magenta
+    6: '#0891B2', // cyan
+    7: '#71717A', // white (mid gray so it survives light surfaces)
+    8: '#6B7280', // bright black (dark gray)
+    9: '#EF4444', // bright red
+    10: '#22C55E', // bright green
+    11: '#D97706', // bright yellow
+    12: '#3B82F6', // bright blue (same as blue for better contrast)
+    13: '#D946EF', // bright magenta
+    14: '#06B6D4', // bright cyan
+    15: '#9CA3AF'  // bright white
 }}); // Create a converter instance
 
 // Custom hook for LogViewerModal to separate logic
@@ -110,16 +112,16 @@ function LogViewerModal({ serverId, transportType, onClose }) {
   const { logs, isLoading, error } = useLogViewer(serverId, transportType);
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[60]"> {/* Higher z-index than ToolsPanel */}
-      <div className="bg-gray-900 w-full max-w-4xl max-h-[90vh] rounded-lg shadow-xl overflow-hidden flex flex-col border border-gray-700">
+    <div className="fixed inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-[60]"> {/* Higher z-index than ToolsPanel */}
+      <div className="glass-card w-full max-w-4xl max-h-[90vh] rounded-lg overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800">
-          <h2 className="text-lg font-semibold text-white">
+        <div className="p-4 border-b border-border flex justify-between items-center">
+          <h2 className="text-lg font-semibold text-foreground">
             Logs for Server: <span className="font-mono text-primary">{serverId}</span>
           </h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-200"
+            className="text-muted-foreground hover:text-foreground"
             aria-label="Close log viewer"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -129,13 +131,13 @@ function LogViewerModal({ serverId, transportType, onClose }) {
         </div>
 
         {/* Log Content */}
-        <div className="flex-1 overflow-y-auto p-4 bg-black text-sm font-mono">
+        <div className="flex-1 overflow-y-auto p-4 bg-muted text-sm font-mono">
           {isLoading ? (
-            <p className="text-gray-400">Loading logs...</p>
+            <p className="text-muted-foreground">Loading logs...</p>
           ) : error ? (
-             <p className="text-red-400">{error}</p>
+             <p className="text-red-600 dark:text-red-400">{error}</p>
           ) : (
-            <pre className="text-gray-300 whitespace-pre-wrap break-words">
+            <pre className="text-foreground whitespace-pre-wrap break-words">
               {/* Render each log line processed by ansi-to-html */}
               {logs.map((line, index) => (
                   <div key={index} dangerouslySetInnerHTML={{ __html: converter.toHtml(line) }} />
@@ -147,10 +149,10 @@ function LogViewerModal({ serverId, transportType, onClose }) {
         </div>
 
         {/* Footer */}
-        <div className="p-3 border-t border-gray-700 bg-gray-800 flex justify-end">
+        <div className="p-3 border-t border-border flex justify-end">
           <button
             onClick={onClose}
-            className="py-2 px-4 bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors text-sm"
+            className="py-2 px-4 bg-secondary hover:bg-accent text-secondary-foreground rounded transition-colors text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             Close
           </button>

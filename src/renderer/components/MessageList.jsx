@@ -26,7 +26,7 @@ function MessageList({ messages = [], onToolCallExecute, onRemoveLastMessage, on
 
   if (messages.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-gray-500">
+      <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
         <p className="text-center max-w-md">
           Send a message to start a conversation with Groq
         </p>
@@ -202,7 +202,7 @@ function MessageList({ messages = [], onToolCallExecute, onRemoveLastMessage, on
       {/* Fullscreen Image Overlay */}
       {fullScreenImage && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 p-4 cursor-pointer"
+          className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 cursor-pointer"
           onClick={() => setFullScreenImage(null)} // Dismiss on click outside image
         >
           <img 

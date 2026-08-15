@@ -230,8 +230,9 @@ function ToolsPanel({ tools = [], onClose, onDisconnectServer, onReconnectServer
     .map(server => server.id);
 
   return (
-    <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50">
-      <Card className="w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+    <div className="fixed inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-50">
+      {/* Plain div instead of Card so the glass surface isn't painted over by Card's opaque bg-card/shadow utilities */}
+      <div className="glass rounded-lg text-foreground w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 pt-4">
           <div className="space-y-0.5">
             <CardTitle className="text-xl">Available Tools</CardTitle>
@@ -330,7 +331,7 @@ function ToolsPanel({ tools = [], onClose, onDisconnectServer, onReconnectServer
                               size="sm"
                               onClick={() => handleAuthorizeServer(server.id)}
                               disabled={actionInProgress === server.id}
-                              className="h-7 px-2 text-xs border-yellow-300 text-yellow-700 hover:bg-yellow-50"
+                              className="h-7 px-2 text-xs border-yellow-500/40 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-500/10"
                             >
                               {actionInProgress === server.id ? 'Authorizing...' : 'Authorize'}
                             </Button>
@@ -450,7 +451,7 @@ function ToolsPanel({ tools = [], onClose, onDisconnectServer, onReconnectServer
           />
         )}
 
-      </Card>
+      </div>
     </div>
   );
 }

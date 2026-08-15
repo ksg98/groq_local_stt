@@ -268,6 +268,12 @@ contextBridge.exposeInMainWorld('electron', {
     getScreenAccessStatus: () => ipcRenderer.invoke('capture-screen-access-status'),
     openScreenSettings: () => ipcRenderer.invoke('capture-open-screen-settings'),
     requestCameraPermission: () => ipcRenderer.invoke('capture-request-camera-permission'),
+    // Cmd/Ctrl+H screenshots taken by the main process land here
+    onScreenshot: (callback) => {
+      const listener = (_event, data) => callback(data);
+      ipcRenderer.on('screenshot-captured', listener);
+      return () => ipcRenderer.removeListener('screenshot-captured', listener);
+    },
   },
 
   // --- Chat History Functions ---

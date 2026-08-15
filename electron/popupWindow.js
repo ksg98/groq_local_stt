@@ -47,7 +47,9 @@ class PopupWindowManager {
       frame: false, // Remove frame to eliminate window controls
       transparent: true,
       hasShadow: true,
-      backgroundColor: '#ffffff',
+      // Fully transparent so the vibrancy material (which follows
+      // nativeTheme) shows through; the renderer paints its own surface
+      backgroundColor: '#00000000',
       vibrancy: 'popover',
       visualEffectState: 'active',
       webPreferences: {

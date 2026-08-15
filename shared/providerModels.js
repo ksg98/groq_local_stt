@@ -297,7 +297,7 @@ async function fetchLocalLlmModels(baseUrl, apiKey) {
     models[`${LOCAL_MODEL_PREFIX}${id}`] = {
       displayName: `${id} (Local)`,
       context: 32768, // /v1/models doesn't report context; override via Custom Models if needed
-      vision_supported: false,
+      vision_supported: visionForModelName(id),
       builtin_tools_supported: false,
       provider: 'local',
       max_tokens_default: 8192,
@@ -468,6 +468,18 @@ function openAIVisionForModel(id) {
   return (
     id.startsWith('gpt-5') || id.startsWith('gpt-4o') || id.startsWith('gpt-4.1') ||
     id.startsWith('chatgpt-') || /^o[34]/.test(id)
+  );
+}
+
+// Fallback for providers whose /v1/models carries no capability info (Groq,
+// local servers) — vision is inferred from the name: OpenAI-family ids (Codex
+// CLI proxies serve ChatGPT models) plus the common open multimodal families.
+// A wrong guess can be corrected per model via Custom Models in Settings.
+function visionForModelName(id) {
+  const lower = id.toLowerCase();
+  if (openAIVisionForModel(lower)) return true;
+  return /(^|[-_./: ])vl([-_./: ]|$)|vision|llava|pixtral|multimodal|omni|moondream|smolvlm|minicpm|internvl|gemma-3|llama[-_. ]?4|maverick|scout/.test(
+    lower
   );
 }
 
@@ -750,4 +762,5 @@ module.exports = {
   getProviderForModel,
   getAudioModels,
   fetchLocalModelInfo,
+  visionForModelName,
 };

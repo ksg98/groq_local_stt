@@ -195,8 +195,8 @@ function ChatHistorySidebar({ onNewChat, onChatLoaded, loading }) {
               className={`
                 relative group flex items-center gap-2 px-3 py-2 cursor-pointer
                 rounded-lg mx-2 transition-colors duration-150
-                ${currentChatId === chat.id 
-                  ? 'bg-[#E9E9DF] text-foreground' 
+                ${currentChatId === chat.id
+                  ? 'bg-secondary text-foreground'
                   : 'hover:bg-muted/50 text-foreground/80 hover:text-foreground'}
                 ${deletingChatId === chat.id ? 'opacity-50' : ''}
               `}
@@ -229,7 +229,7 @@ function ChatHistorySidebar({ onNewChat, onChatLoaded, loading }) {
                       <button
                         ref={(el) => menuButtonRefs.current[chat.id] = el}
                         onClick={(e) => handleMenuToggle(e, chat.id)}
-                        className="p-1 rounded hover:bg-background/80 transition-colors"
+                        className="p-1 rounded hover:bg-accent/60 transition-colors"
                       >
                         <MoreVertical className="h-4 w-4" />
                       </button>
@@ -239,7 +239,7 @@ function ChatHistorySidebar({ onNewChat, onChatLoaded, loading }) {
                   {/* Dropdown menu - rendered with fixed position to escape overflow clipping */}
                   {menuOpenChatId === chat.id && (
                     <div 
-                      className="fixed py-1 bg-background border border-border rounded-md shadow-lg min-w-[120px]"
+                      className="fixed py-1 glass-card rounded-md min-w-[120px]"
                       style={{ 
                         top: menuPosition.top, 
                         left: menuPosition.left,
@@ -268,7 +268,7 @@ function ChatHistorySidebar({ onNewChat, onChatLoaded, loading }) {
     <div 
       ref={sidebarRef}
       className={`
-        flex flex-col h-full bg-background border-r border-border relative
+        flex flex-col h-full glass relative
         ${isResizing ? '' : 'transition-all duration-300 ease-in-out'}
       `}
       style={{ 

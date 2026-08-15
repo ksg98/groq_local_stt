@@ -993,14 +993,33 @@ async function handleResponsesApiStream(event, messages, model, settings, modelC
                 continue;
             }
 
-            // Standard message
+            // Standard message. User content can be multimodal (screenshare/
+            // camera frames, uploads) — the Responses API takes those as
+            // input_text / input_image parts, not a flattened string.
+            if (msg.role === 'user' && Array.isArray(msg.content) &&
+                msg.content.some(p => p.type === 'image_url')) {
+                const parts = [];
+                for (const part of msg.content) {
+                    if (part.type === 'image_url') {
+                        const url = (part.image_url && part.image_url.url) || part.image_url;
+                        if (typeof url === 'string' && url) {
+                            parts.push({ type: 'input_image', image_url: url });
+                        }
+                    } else if (part.text) {
+                        parts.push({ type: 'input_text', text: part.text });
+                    }
+                }
+                input.push({ role: 'user', content: parts });
+                continue;
+            }
+
             let contentText = "";
             if (typeof msg.content === 'string') {
                 contentText = msg.content;
             } else if (Array.isArray(msg.content)) {
                 contentText = msg.content.map(p => p.text || "").join("");
             }
-            
+
             input.push({
                 role: msg.role,
                 content: contentText

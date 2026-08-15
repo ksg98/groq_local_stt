@@ -12,40 +12,60 @@
     --popover-foreground: 224 71.4% 4.1%;
     --primary: 9 90% 59%;
     --primary-foreground: 0 0% 98%;
-    --secondary: 220 14.3% 95.9%;
+    --secondary: 55 12% 89%;
     --secondary-foreground: 220.9 39.3% 11%;
-    --muted: 220 14.3% 95.9%;
+    --muted: 55 10% 90%;
     --muted-foreground: 220 8.9% 46.1%;
-    --accent: 220 14.3% 95.9%;
+    --accent: 55 12% 89%;
     --accent-foreground: 220.9 39.3% 11%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
-    --border: 220 13% 91%;
-    --input: 220 13% 91%;
+    --border: 50 8% 86%;
+    --input: 50 8% 86%;
     --ring: 9 90% 59%;
     --radius: 0.5rem;
+
+    /* Glass surface system — the app's glossy signature. Panels/chrome use
+       .glass / .glass-card; primary actions use .glossy-primary. */
+    --glass-bg: rgba(255, 255, 255, 0.55);
+    --glass-bg-strong: rgba(255, 255, 255, 0.72);
+    --glass-border: rgba(255, 255, 255, 0.65);
+    --glass-edge: rgba(20, 20, 30, 0.07);
+    --glass-highlight: rgba(255, 255, 255, 0.85);
+    --glass-shadow: 0 8px 32px rgba(30, 30, 40, 0.1);
+    --ambient-a: rgba(245, 80, 54, 0.05);
+    --ambient-b: rgba(120, 140, 200, 0.06);
   }
 
   .dark {
-    --background: 224 71.4% 4.1%;
-    --foreground: 0 0% 95%;
-    --card: 224 71.4% 4.1%;
-    --card-foreground: 0 0% 95%;
-    --popover: 224 71.4% 4.1%;
-    --popover-foreground: 0 0% 95%;
+    --background: 225 10% 8%;
+    --foreground: 40 10% 94%;
+    --card: 225 9% 12%;
+    --card-foreground: 40 10% 94%;
+    --popover: 225 9% 11%;
+    --popover-foreground: 40 10% 94%;
     --primary: 9 90% 59%;
     --primary-foreground: 0 0% 98%;
-    --secondary: 215 27.9% 16.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 215 27.9% 16.9%;
-    --muted-foreground: 217.9 10.6% 64.9%;
-    --accent: 215 27.9% 16.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
+    --secondary: 225 8% 16%;
+    --secondary-foreground: 40 10% 94%;
+    --muted: 225 8% 15%;
+    --muted-foreground: 225 7% 64%;
+    --accent: 225 8% 17%;
+    --accent-foreground: 40 10% 94%;
+    --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 98%;
-    --border: 215 27.9% 16.9%;
-    --input: 215 27.9% 16.9%;
+    --border: 225 8% 19%;
+    --input: 225 8% 19%;
     --ring: 9 90% 59%;
+
+    --glass-bg: rgba(255, 255, 255, 0.05);
+    --glass-bg-strong: rgba(255, 255, 255, 0.08);
+    --glass-border: rgba(255, 255, 255, 0.1);
+    --glass-edge: rgba(0, 0, 0, 0.35);
+    --glass-highlight: rgba(255, 255, 255, 0.12);
+    --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+    --ambient-a: rgba(245, 80, 54, 0.07);
+    --ambient-b: rgba(90, 110, 180, 0.08);
   }
 }
 
@@ -54,23 +74,56 @@
     @apply border-border;
   }
   body {
-    @apply bg-transparent text-foreground;
+    @apply text-foreground;
+    background-color: hsl(var(--background));
+    /* Faint ambient glows give the glass surfaces something to refract */
+    background-image:
+      radial-gradient(1200px 600px at 15% -10%, var(--ambient-a), transparent 60%),
+      radial-gradient(1000px 700px at 110% 110%, var(--ambient-b), transparent 60%);
+    background-attachment: fixed;
+  }
+  /* Popup window paints via macOS vibrancy — keep the page itself clear */
+  body.popup-window {
+    background-color: transparent;
+    background-image: none;
   }
 }
 
 @layer components {
-  .btn {
-    @apply px-4 py-2 rounded-md font-medium transition-colors;
-  }
-  
-  .btn-primary {
-    @apply bg-[#F55036] text-white hover:bg-[#F55036]/90;
-  }
-  
-  .input {
-    @apply px-4 py-2 border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring bg-background text-foreground;
+  /* Chrome surfaces: input bar, sidebar, modals, panels, pickers */
+  .glass {
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border: 1px solid var(--glass-border);
+    box-shadow: inset 0 1px 0 var(--glass-highlight), 0 0 0 1px var(--glass-edge), var(--glass-shadow);
   }
 
+  /* Elevated glass: cards, bubbles, dropdowns that sit above other content */
+  .glass-card {
+    background: var(--glass-bg-strong);
+    backdrop-filter: blur(24px) saturate(1.4);
+    -webkit-backdrop-filter: blur(24px) saturate(1.4);
+    border: 1px solid var(--glass-border);
+    box-shadow: inset 0 1px 0 var(--glass-highlight), 0 0 0 1px var(--glass-edge), var(--glass-shadow);
+  }
+
+  /* Primary action sheen — coral gradient with a specular top edge. Midpoint
+     kept dark enough for white text-sm labels (~4.5:1). */
+  .glossy-primary {
+    background: linear-gradient(180deg, #fb6d4e 0%, #e0432a 45%, #cc3a22 100%);
+    border: 1px solid rgba(204, 58, 34, 0.7);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 2px 12px rgba(245, 80, 54, 0.35);
+    color: #fff;
+    font-weight: 600;
+  }
+  .glossy-primary:hover {
+    background: linear-gradient(180deg, #ff7a5c 0%, #ee4a2f 45%, #d63e25 100%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 3px 16px rgba(245, 80, 54, 0.45);
+  }
+}
+
+@layer components {
   /* Markdown styling */
   .markdown-content {
     @apply text-inherit;
@@ -109,7 +162,8 @@
     @apply list-decimal;
   }
 
-  .markdown-content code {
+  /* Inline code chips only — highlighted blocks carry their own theme */
+  .markdown-content code:not([class*="language-"]) {
     @apply bg-muted px-1 py-0.5 rounded;
   }
 
@@ -144,38 +198,8 @@
   word-break: break-all;
 }
 
-/* Tools and status indicators */
-.tools-button {
-  @apply flex items-center justify-center text-muted-foreground bg-muted hover:text-foreground p-2 rounded-full transition-colors;
-}
-
-.status-indicator {
-  @apply flex items-center gap-2 text-sm text-muted-foreground bg-muted font-medium px-3 py-1 rounded-full;
-}
-
-.status-indicator.loading {
-  @apply text-primary font-medium;
-}
-
 .loading-spinner {
   @apply w-4 h-4 border-2 border-primary/20 border-t-primary rounded-full animate-spin;
-}
-
-.refresh-button {
-  @apply bg-transparent border-none text-muted-foreground hover:text-primary cursor-pointer transition-colors p-1 rounded-full flex items-center justify-center w-6 h-6;
-}
-
-.refresh-button span {
-  @apply inline-block transition-transform;
-}
-
-/* Model selector styling */
-select#model-select {
-  @apply appearance-none bg-transparent text-muted-foreground text-sm border-none focus:ring-0 cursor-pointer hover:text-foreground transition-colors;
-}
-
-select#model-select option {
-  @apply bg-background text-foreground;
 }
 
 /* Message streaming animation */
@@ -233,14 +257,6 @@ select#model-select option {
 }
 
 /* Reasoning section styles */
-.reasoning-section {
-  @apply mt-2 text-sm;
-}
-
-.reasoning-toggle {
-  @apply text-xs text-muted-foreground bg-transparent border-none underline cursor-pointer px-1 py-0.5 mt-1 rounded transition-all duration-200 hover:text-primary hover:bg-primary/10;
-}
-
 .reasoning-content .markdown-content p {
   margin-bottom: 0 !important;
 }
@@ -258,68 +274,4 @@ select#model-select {
   background-size: 1.5em 1.5em;
 }
 
-/* Chat History Sidebar Styles */
-.chat-sidebar {
-  @apply flex flex-col h-full bg-background border-r border-border;
-  transition: width 0.3s ease-in-out;
-}
-
-.chat-sidebar.collapsed {
-  @apply w-16;
-}
-
-.chat-sidebar.expanded {
-  @apply w-64;
-}
-
-.chat-sidebar-header {
-  @apply flex items-center justify-between p-3 border-b border-border;
-}
-
-.chat-list-item {
-  @apply relative flex items-center gap-2 px-3 py-2 cursor-pointer rounded-lg mx-2 transition-colors duration-150;
-}
-
-.chat-list-item:hover {
-  @apply bg-muted/50;
-}
-
-.chat-list-item.active {
-  @apply bg-[#E9E9DF] text-foreground;
-}
-
-.chat-list-item .chat-title {
-  @apply truncate text-sm font-medium;
-}
-
-.chat-list-item .chat-time {
-  @apply flex items-center gap-1 text-xs text-muted-foreground;
-}
-
-/* Sidebar group headers */
-.chat-group-header {
-  @apply px-3 py-1 text-xs font-medium text-muted-foreground uppercase tracking-wider;
-}
-
-/* Sidebar scrollbar styling */
-.chat-sidebar .overflow-y-auto {
-  scrollbar-width: thin;
-  scrollbar-color: hsl(var(--muted)) transparent;
-}
-
-.chat-sidebar .overflow-y-auto::-webkit-scrollbar {
-  width: 6px;
-}
-
-.chat-sidebar .overflow-y-auto::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.chat-sidebar .overflow-y-auto::-webkit-scrollbar-thumb {
-  background-color: hsl(var(--muted));
-  border-radius: 3px;
-}
-
-.chat-sidebar .overflow-y-auto::-webkit-scrollbar-thumb:hover {
-  background-color: hsl(var(--muted-foreground));
-} 
+ 

@@ -143,6 +143,12 @@ const CustomModelSelector = ({ selectedModel, models, onModelChange, isCompact =
 };
 
 const PopupPage = () => {
+  // Popup paints via the window's vibrancy material — body must stay clear
+  useEffect(() => {
+    document.body.classList.add('popup-window');
+    return () => document.body.classList.remove('popup-window');
+  }, []);
+
   const [context, setContext] = useState(null);
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
@@ -157,7 +163,6 @@ const PopupPage = () => {
   const [files, setFiles] = useState([]);
   const [fullScreenImage, setFullScreenImage] = useState(null);
   const [visionSupported, setVisionSupported] = useState(false);
-  const [suggestion, setSuggestion] = useState('');
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -311,21 +316,6 @@ const PopupPage = () => {
   };
 
   const handleKeyPress = (e) => {
-    // Accept suggestion on Tab (only if autocomplete is enabled)
-    if (e.key === 'Tab' && autocompleteEnabled && suggestion) {
-      e.preventDefault();
-      setInputValue(inputValue + suggestion);
-      setSuggestion('');
-      return; // Prevent other key handlers from firing
-    }
-
-    // Clear suggestion on escape, but only if there's a suggestion
-    if (e.key === 'Escape' && suggestion) {
-      e.preventDefault();
-      setSuggestion('');
-      return;
-    }
-
     if (e.key === 'Escape') {
       closePopup();
     } else if (e.key === 'Enter' && !e.shiftKey) {
@@ -426,7 +416,6 @@ const PopupPage = () => {
     setMessages(prev => [...prev, userMessageForUi]);
     setInputValue('');
     setFiles([]); // Clear files after sending
-    setSuggestion(''); // Clear suggestion on send
     setLoading(true);
     
     // Create message for model
@@ -610,7 +599,7 @@ const PopupPage = () => {
   return (
     <div 
       ref={popupRef} 
-      className="flex flex-col bg-neutral-50 backdrop-blur-xl animate-in fade-in-0 zoom-in-95 duration-300 scrollbar-none" 
+      className="flex flex-col glass animate-in fade-in-0 zoom-in-95 duration-300 scrollbar-none"
       style={{ WebkitAppRegion: 'drag' }}
     >
       
@@ -632,7 +621,7 @@ const PopupPage = () => {
       {isExpanded && (
         <>
           {/* Header - Only shows when expanded */}
-          <div className="px-4 pt-3 pb-2 flex justify-between items-center sticky top-0 z-50 bg-background/95 backdrop-blur-sm" style={{ WebkitAppRegion: 'drag' }}>
+          <div className="px-4 pt-3 pb-2 flex justify-between items-center sticky top-0 z-50 border-b border-border/50" style={{ WebkitAppRegion: 'drag' }}>
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 bg-green-500 rounded-full"></div>
@@ -679,8 +668,9 @@ const PopupPage = () => {
       )}
 
       {/* Input Area */}
-      <div className={cn("bg-white backdrop-blur-sm rounded-b-3xl sticky bottom-0", {
+      <div className={cn("rounded-b-3xl sticky bottom-0", {
         "flex-1 flex items-center rounded-3xl": !isExpanded,
+        "border-t border-border/50": isExpanded,
       })}>
         <div className="p-4 w-full space-y-3">
           {/* Header with Logo and Model Selector - Always visible */}
@@ -810,7 +800,7 @@ const PopupPage = () => {
                 onClick={handleSendMessage}
                 disabled={!inputValue.trim() || loading}
                 size="icon"
-                className="absolute right-2 bottom-2 h-8 w-8 rounded-xl bg-primary hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground shadow-md hover:shadow-lg transition-all duration-200 hover:scale-105"
+                className="absolute right-2 bottom-2 h-8 w-8 rounded-xl disabled:bg-none disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:shadow-none disabled:opacity-100 transition-all duration-200 hover:scale-105"
                 style={{ WebkitAppRegion: 'no-drag' }}
               >
                 {loading ? (
@@ -829,7 +819,7 @@ const PopupPage = () => {
       {/* Fullscreen Image Modal */}
       {fullScreenImage && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 p-4 cursor-pointer"
+          className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 cursor-pointer"
           onClick={() => setFullScreenImage(null)}
           style={{ WebkitAppRegion: 'no-drag' }}
         >
@@ -841,7 +831,7 @@ const PopupPage = () => {
           />
           <button
             onClick={() => setFullScreenImage(null)}
-            className="absolute top-4 right-4 bg-black bg-opacity-50 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-opacity-70 transition-all"
+            className="absolute top-4 right-4 bg-black/50 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-black/70 transition-all"
             aria-label="Close fullscreen image"
           >
             ✕

@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import ToolCall from './ToolCall';
 import MarkdownRenderer from './MarkdownRenderer';
 import { TextShimmer } from './ui/text-shimmer';
-import { Badge } from './ui/badge';
+import { badgeVariants } from './ui/badge';
+import { cn } from '../lib/utils';
 import { Zap } from 'lucide-react';
 
 function Message({ message, children, onToolCallExecute, allMessages, isLastMessage, messageIndex, onReloadFromMessage, loading, onActionsVisible, hideReasoningUI = false, combinedReasoning = null, combinedReasoningDuration = null }) {
@@ -91,11 +92,11 @@ function Message({ message, children, onToolCallExecute, allMessages, isLastMess
 
   const messageClasses = `flex ${isUser ? 'justify-end' : 'justify-start'}`;
   // Apply background only for user messages
-  const bubbleStyle = isUser ? 'bg-[#E9E9DF]' : ''; // No background for assistant/system
+  const bubbleStyle = isUser ? 'glass-card' : ''; // No background for assistant/system
   const bubbleClasses = isUser
     ? `relative overflow-x-auto px-4 py-3 rounded-lg max-w-xl max-h-[500px] overflow-y-auto cursor-pointer ${bubbleStyle}`
     : `relative w-full`; // Assistant bubbles full-width, no background, text wraps naturally
-  const wrapperClasses = `message-content-wrapper ${isUser ? 'text-black' : 'text-black'} break-words text-sm overflow-hidden`; // Keep text black for both, use break-words, smaller font, contain overflow
+  const wrapperClasses = `message-content-wrapper ${isUser ? 'text-foreground' : 'text-foreground'} break-words text-sm overflow-hidden`; // Token text color for both, use break-words, smaller font, contain overflow
 
   const toggleReasoning = () => setShowReasoning(!showReasoning);
   const toggleExecutedTools = () => setShowExecutedTools(!showExecutedTools);
@@ -157,11 +158,11 @@ function Message({ message, children, onToolCallExecute, allMessages, isLastMess
                         key={latestSummary.index}
                         className="flex items-center text-sm"
                       >
-                        <TextShimmer 
-                          as="span" 
-                          duration={2.5} 
+                        <TextShimmer
+                          as="span"
+                          duration={2.5}
                           spread={3}
-                          className="text-sm font-medium text-gray-700"
+                          className="text-sm font-medium text-muted-foreground"
                         >
                           {latestSummary.summary}
                         </TextShimmer>
@@ -176,7 +177,7 @@ function Message({ message, children, onToolCallExecute, allMessages, isLastMess
               {!hideReasoningUI && hasReasoningSummaries && isReasoningComplete && effectiveReasoningDuration != null && (
                 <button 
                   onClick={toggleReasoning}
-                  className="flex items-center text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors duration-200 cursor-pointer bg-transparent border-none p-0"
+                  className="flex items-center text-sm font-medium text-muted-foreground hover:text-foreground transition-colors duration-200 cursor-pointer bg-transparent border-none p-0"
                 >
                   <span>Thought for {effectiveReasoningDuration}s</span>
                   <svg 
@@ -197,7 +198,7 @@ function Message({ message, children, onToolCallExecute, allMessages, isLastMess
               {!hideReasoningUI && hasReasoning && !hasReasoningSummaries && (
                 <button 
                   onClick={toggleReasoning}
-                  className="flex items-center text-sm px-3 py-1 rounded-md bg-blue-100 hover:bg-blue-200 text-blue-800 transition-colors duration-200"
+                  className="flex items-center text-sm px-3 py-1 rounded-md bg-primary/10 hover:bg-primary/20 text-primary transition-colors duration-200"
                 >
                   <svg 
                     xmlns="http://www.w3.org/2000/svg" 
@@ -211,7 +212,7 @@ function Message({ message, children, onToolCallExecute, allMessages, isLastMess
                   </svg>
                   {isStreamingMessage && liveReasoning ? 'Thinking...' : 'Show reasoning'}
                   {isStreamingMessage && liveReasoning && (
-                    <svg className="animate-spin ml-2 h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <svg className="animate-spin ml-2 h-4 w-4 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
@@ -221,9 +222,9 @@ function Message({ message, children, onToolCallExecute, allMessages, isLastMess
               
               {/* Tool execution dropdown - badge style matching header "5 tools" chip */}
               {hasExecutedTools && (
-                <Badge 
-                  variant="secondary" 
-                  className="bg-[#E9E9DF] hover:bg-[#DDD9D0] cursor-pointer transition-colors duration-200"
+                <button
+                  type="button"
+                  className={cn(badgeVariants({ variant: 'secondary' }), "bg-secondary hover:bg-accent cursor-pointer transition-colors duration-200")}
                   onClick={toggleExecutedTools}
                 >
                   <Zap className="w-3 h-3 mr-1" />
@@ -244,7 +245,7 @@ function Message({ message, children, onToolCallExecute, allMessages, isLastMess
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
                   )}
-                </Badge>
+                </button>
               )}
             </div>
             
@@ -254,7 +255,7 @@ function Message({ message, children, onToolCallExecute, allMessages, isLastMess
               <div 
                 className="mt-2 text-md transition-all duration-200 max-h-[600px] overflow-y-auto reasoning-content"
               >
-                <div className="whitespace-pre-wrap break-words italic text-gray-700">
+                <div className="whitespace-pre-wrap break-words italic text-muted-foreground">
                   <MarkdownRenderer
                     content={currentReasoning
                       .replace(/<tool[^>]*>([\s\S]*?)<\/tool>/gi, '**Tool call:**\n```$1```')
@@ -274,23 +275,23 @@ function Message({ message, children, onToolCallExecute, allMessages, isLastMess
                   const isLive = liveExecutedTools?.length > 0;
                   const isExecuting = isLive && !tool.output;
                   return (
-                    <div key={`tool-${tool.index || index}`} className="p-3 rounded-md text-sm border bg-[#F5F5F0] border-[#E5E5DC]">
-                      <div className="flex items-center gap-2 mb-2 text-gray-700">
+                    <div key={`tool-${tool.index || index}`} className="p-3 rounded-md text-sm border bg-muted/60 border-border">
+                      <div className="flex items-center gap-2 mb-2 text-foreground">
                         <span className="font-medium">{tool.name || tool.type || 'function'}</span>
                         {tool.server_label && (
-                          <span className="px-1.5 py-0.5 text-xs rounded bg-[#E9E9DF] text-gray-600">
+                          <span className="px-1.5 py-0.5 text-xs rounded bg-secondary text-muted-foreground">
                             {tool.server_label}
                           </span>
                         )}
-                        <span className={`text-xs ${isExecuting ? 'text-amber-600' : 'text-gray-500'}`}>
+                        <span className={`text-xs ${isExecuting ? 'text-primary' : 'text-muted-foreground'}`}>
                           {isExecuting ? '• running' : '• done'}
                         </span>
                       </div>
                       
                       {tool.arguments && (
                         <div className="mb-2">
-                          <div className="text-xs mb-1 text-gray-500">Code:</div>
-                          <pre className="p-2 rounded overflow-x-auto text-xs bg-white/60 text-gray-800 border border-[#E5E5DC]">
+                          <div className="text-xs mb-1 text-muted-foreground">Code:</div>
+                          <pre className="p-2 rounded overflow-x-auto text-xs bg-card/60 text-foreground border border-border">
                             {typeof tool.arguments === 'string' ? 
                               (tool.arguments.startsWith('{') ? 
                                 (() => {
@@ -318,8 +319,8 @@ function Message({ message, children, onToolCallExecute, allMessages, isLastMess
                               // Show output directly for 10 lines or fewer
                               return (
                                 <div>
-                                  <div className="text-xs mb-1 text-gray-500">Output:</div>
-                                  <pre className="bg-white p-2 rounded overflow-x-auto text-xs border border-[#E5E5DC] text-gray-800">
+                                  <div className="text-xs mb-1 text-muted-foreground">Output:</div>
+                                  <pre className="bg-card/60 p-2 rounded overflow-x-auto text-xs border border-border text-foreground">
                                     {tool.output}
                                   </pre>
                                 </div>
@@ -330,20 +331,20 @@ function Message({ message, children, onToolCallExecute, allMessages, isLastMess
                             return (
                               <div>
                                 <div className="flex items-center justify-between mb-1">
-                                  <div className="text-xs text-gray-500">Output:</div>
+                                  <div className="text-xs text-muted-foreground">Output:</div>
                                   <button
                                     onClick={() => toggleOutputCollapse(tool.index || index)}
-                                    className="text-xs px-2 py-0.5 rounded bg-[#E9E9DF] text-gray-600 hover:bg-[#DDD9D0] transition-colors"
+                                    className="text-xs px-2 py-0.5 rounded bg-secondary text-muted-foreground hover:bg-accent transition-colors"
                                   >
                                     {isOutputCollapsed(tool.index || index) ? 'Show' : 'Hide'}
                                   </button>
                                 </div>
                                 {isOutputCollapsed(tool.index || index) ? (
-                                  <div className="bg-white p-2 rounded text-xs border border-[#E5E5DC] text-gray-500 italic">
+                                  <div className="bg-card/60 p-2 rounded text-xs border border-border text-muted-foreground italic">
                                     Output available (click Show to expand)
                                   </div>
                                 ) : (
-                                  <pre className="bg-white p-2 rounded overflow-x-auto text-xs border border-[#E5E5DC] text-gray-800">
+                                  <pre className="bg-card/60 p-2 rounded overflow-x-auto text-xs border border-border text-foreground">
                                     {tool.output}
                                   </pre>
                                 )}
@@ -383,10 +384,10 @@ function Message({ message, children, onToolCallExecute, allMessages, isLastMess
 
         {/* Usage stats, copy, and reload button for the last assistant message only */}
         {!isUser && showActions && (
-          <div className="flex items-center gap-3 mt-3 pt-3 border-t border-gray-200 text-xs text-gray-600">
+          <div className="flex items-center gap-3 mt-3 pt-3 border-t border-border text-xs text-muted-foreground">
             {usage?.completion_tokens && usage?.completion_time && (
               <div className="flex items-center gap-1.5">
-                <svg className="w-3.5 h-3.5" viewBox="0 0 370 563" fill="#F43E01" xmlns="http://www.w3.org/2000/svg">
+                <svg className="w-3.5 h-3.5 text-primary" viewBox="0 0 370 563" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
                   <path d="M165.98 342.21H0L272.4 1.5l-68.75 220.11H369.6L97.23 562.32z"/>
                 </svg>
                 <span className="font-medium">
@@ -397,7 +398,7 @@ function Message({ message, children, onToolCallExecute, allMessages, isLastMess
             <div className="relative group">
               <button
                 onClick={handleCopy}
-                className="flex items-center justify-center p-1.5 rounded hover:bg-[#E9E9DF] transition-colors"
+                className="flex items-center justify-center p-1.5 rounded hover:bg-accent transition-colors"
               >
                 {copySuccess ? (
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -409,7 +410,7 @@ function Message({ message, children, onToolCallExecute, allMessages, isLastMess
                   </svg>
                 )}
               </button>
-              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 glass-card text-foreground text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
                 {copySuccess ? 'Copied!' : 'Copy'}
               </div>
             </div>
@@ -417,13 +418,13 @@ function Message({ message, children, onToolCallExecute, allMessages, isLastMess
               <div className="relative group">
                 <button
                   onClick={() => onReloadFromMessage(messageIndex)}
-                  className="flex items-center justify-center p-1.5 rounded hover:bg-[#E9E9DF] transition-colors"
+                  className="flex items-center justify-center p-1.5 rounded hover:bg-accent transition-colors"
                 >
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                   </svg>
                 </button>
-                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 glass-card text-foreground text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
                   Reload
                 </div>
               </div>

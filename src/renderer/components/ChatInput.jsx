@@ -21,6 +21,7 @@ function ChatInput({
 	onReasoningEffortChange,
 	voiceAgent = null,
 	capture = null,
+	onVisionRequired,
 }) {
 	const [message, setMessage] = useState("");
 	const [suggestion, setSuggestion] = useState("");
@@ -116,11 +117,11 @@ function ChatInput({
 	// Voice agent status pill styling per state
 	const AGENT_STATE_STYLES = {
 		starting: { label: 'Starting voice…', cls: 'bg-muted/40 border-border/50 text-muted-foreground', dot: 'bg-muted-foreground' },
-		listening: { label: 'Listening', cls: 'bg-green-500/10 border-green-500/30 text-green-700', dot: 'bg-green-500 animate-pulse' },
-		transcribing: { label: 'Transcribing…', cls: 'bg-amber-500/10 border-amber-500/30 text-amber-700', dot: 'bg-amber-500 animate-pulse' },
-		thinking: { label: 'Thinking…', cls: 'bg-amber-500/10 border-amber-500/30 text-amber-700', dot: 'bg-amber-500 animate-pulse' },
-		speaking: { label: 'Speaking', cls: 'bg-blue-500/10 border-blue-500/30 text-blue-700', dot: 'bg-blue-500 animate-pulse' },
-		error: { label: 'Voice error', cls: 'bg-red-500/10 border-red-500/30 text-red-600', dot: 'bg-red-500' },
+		listening: { label: 'Listening', cls: 'bg-green-500/10 border-green-500/30 text-green-700 dark:text-green-300', dot: 'bg-green-500 animate-pulse' },
+		transcribing: { label: 'Transcribing…', cls: 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300', dot: 'bg-amber-500 animate-pulse' },
+		thinking: { label: 'Thinking…', cls: 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300', dot: 'bg-amber-500 animate-pulse' },
+		speaking: { label: 'Speaking', cls: 'bg-blue-500/10 border-blue-500/30 text-blue-700 dark:text-blue-300', dot: 'bg-blue-500 animate-pulse' },
+		error: { label: 'Voice error', cls: 'bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400', dot: 'bg-red-500' },
 	};
 	const agentStateInfo = (() => {
 		if (!voiceAgent?.active) return null;
@@ -279,6 +280,50 @@ function ChatInput({
 			document.removeEventListener('keydown', handleKeyDown);
 		};
 	}, [fullScreenImage]);
+
+	// ⌘H screenshots arrive from the main process (which hides the window,
+	// grabs the screen behind it and restores focus); attach them like an
+	// uploaded image. ⌘L clears all pending attachments.
+	useEffect(() => {
+		const unsubscribe = window.electron?.capture?.onScreenshot?.((payload) => {
+			if (payload?.error) {
+				alert(payload.error);
+				return;
+			}
+			const dataUrl = payload?.dataUrl;
+			if (!dataUrl) return;
+			if (!visionSupported) {
+				alert("The selected model does not support image inputs. Please select a vision-capable model to attach screenshots.");
+				return;
+			}
+			setFiles((prev) => {
+				if (prev.length >= 5) {
+					alert("You can attach at most 5 files.");
+					return prev;
+				}
+				return [...prev, {
+					base64: dataUrl,
+					name: `Screenshot ${new Date().toLocaleTimeString()}.jpg`,
+					type: 'image/jpeg',
+					size: Math.round((dataUrl.length * 3) / 4),
+					fileType: 'image',
+				}];
+			});
+			textareaRef.current?.focus();
+		});
+		return unsubscribe;
+	}, [visionSupported]);
+
+	useEffect(() => {
+		const handleClearShortcut = (event) => {
+			if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'l') {
+				event.preventDefault();
+				setFiles([]);
+			}
+		};
+		window.addEventListener('keydown', handleClearShortcut);
+		return () => window.removeEventListener('keydown', handleClearShortcut);
+	}, []);
 
 	// Push-to-talk with space bar (hold space for 500ms+ to activate)
 	useEffect(() => {
@@ -456,7 +501,7 @@ function ChatInput({
 	return (
     <div 
 			className={cn(
-				"flex flex-col gap-4 border border-[#CBCDC2] rounded-2xl w-full p-3 bg-[#E9E9DF] backdrop-blur-sm",
+				"glass flex flex-col gap-4 rounded-2xl w-full p-3",
 				isDragOver 
 					? "border-primary border-2 bg-primary/5 transition-all duration-200" 
 					: ""
@@ -559,7 +604,7 @@ function ChatInput({
 						<Button
 							type={loading ? "button" : "submit"}
 							size="icon"
-							className="h-12 w-12 rounded-2xl bg-primary hover:bg-primary/90 shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-105"
+							className="h-12 w-12 rounded-2xl transition-all duration-200 hover:scale-105"
 							disabled={!loading && (!message.trim() && files.length === 0)}
 							onClick={loading ? (e) => {
 								e.preventDefault();
@@ -585,7 +630,7 @@ function ChatInput({
 								variant="ghost"
 								size="sm"
 								onClick={() => fileInputRef.current?.click()}
-								className="text-muted-foreground hover:text-foreground hover:bg-white/40 hover:shadow-sm transition-all duration-200 rounded-xl px-3 py-1.5"
+								className="text-muted-foreground hover:text-foreground hover:bg-accent/60 hover:shadow-sm transition-all duration-200 rounded-xl px-3 py-1.5"
 								title={visionSupported ? "Upload file or image (max 5)" : "Upload files (images require vision-capable model)"}
 								disabled={loading}
 							>
@@ -610,7 +655,7 @@ function ChatInput({
 								variant="ghost"
 								size="sm"
 								onClick={onOpenMcpTools}
-								className="text-muted-foreground hover:text-foreground hover:bg-white/40 hover:shadow-sm transition-all duration-200 rounded-xl px-3 py-1.5"
+								className="text-muted-foreground hover:text-foreground hover:bg-accent/60 hover:shadow-sm transition-all duration-200 rounded-xl px-3 py-1.5"
 								title="Open MCP tools panel"
 								disabled={loading}
 							>
@@ -623,7 +668,7 @@ function ChatInput({
 						{isRecording || isTranscribing ? (
 							<div className="flex items-center gap-2 bg-red-500/10 border border-red-500/30 rounded-xl px-3 py-1.5 animate-pulse">
 								<div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-								<span className="text-sm font-medium text-red-600 tabular-nums">
+								<span className="text-sm font-medium text-red-600 dark:text-red-400 tabular-nums">
 									{isTranscribing ? 'Processing...' : formattedDuration}
 								</span>
 								<Button
@@ -631,7 +676,7 @@ function ChatInput({
 									variant="ghost"
 									size="sm"
 									onClick={isRecording ? stopRecording : undefined}
-									className="p-1 h-6 w-6 text-green-700 hover:text-green-800 hover:bg-green-500/20 rounded-lg"
+									className="p-1 h-6 w-6 text-green-700 hover:text-green-800 dark:text-green-400 dark:hover:text-green-300 hover:bg-green-500/20 rounded-lg"
 									title="Finish and transcribe (same as releasing Space)"
 									disabled={isTranscribing}
 								>
@@ -642,7 +687,7 @@ function ChatInput({
 									variant="ghost"
 									size="sm"
 									onClick={isRecording ? cancelRecording : undefined}
-									className="p-1 h-6 w-6 text-red-600 hover:text-red-700 hover:bg-red-500/20 rounded-lg"
+									className="p-1 h-6 w-6 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 hover:bg-red-500/20 rounded-lg"
 									title="Cancel recording"
 									disabled={isTranscribing}
 								>
@@ -655,7 +700,7 @@ function ChatInput({
 								variant="ghost"
 								size="sm"
 								onClick={toggleRecording}
-								className="text-muted-foreground hover:text-foreground hover:bg-white/40 hover:shadow-sm transition-all duration-200 rounded-xl px-3 py-1.5"
+								className="text-muted-foreground hover:text-foreground hover:bg-accent/60 hover:shadow-sm transition-all duration-200 rounded-xl px-3 py-1.5"
 								title={voiceAgent?.active ? "Voice input unavailable while the agent is listening" : "Voice input (or hold Space)"}
 								disabled={loading || voiceAgent?.active}
 							>
@@ -682,7 +727,7 @@ function ChatInput({
 										variant="ghost"
 										size="sm"
 										onClick={voiceAgent.toggleMicMute}
-										className="p-1 h-6 w-6 hover:bg-black/10 rounded-lg"
+										className="p-1 h-6 w-6 hover:bg-foreground/10 rounded-lg"
 										title={voiceAgent.micMuted ? "Unmute mic — resume listening" : "Mute mic — stop listening"}
 									>
 										{voiceAgent.micMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
@@ -692,7 +737,7 @@ function ChatInput({
 										variant="ghost"
 										size="sm"
 										onClick={voiceAgent.toggleMute}
-										className="p-1 h-6 w-6 hover:bg-black/10 rounded-lg"
+										className="p-1 h-6 w-6 hover:bg-foreground/10 rounded-lg"
 										title={voiceAgent.muted ? "Unmute — speak replies aloud" : "Mute — replies stay text-only"}
 									>
 										{voiceAgent.muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
@@ -702,7 +747,7 @@ function ChatInput({
 										variant="ghost"
 										size="sm"
 										onClick={voiceAgent.stop}
-										className="p-1 h-6 w-6 hover:bg-black/10 rounded-lg"
+										className="p-1 h-6 w-6 hover:bg-foreground/10 rounded-lg"
 										title="Stop voice agent"
 									>
 										<X className="w-4 h-4" />
@@ -714,7 +759,7 @@ function ChatInput({
 									variant="ghost"
 									size="sm"
 									onClick={voiceAgent.start}
-									className="text-muted-foreground hover:text-foreground hover:bg-white/40 hover:shadow-sm transition-all duration-200 rounded-xl px-3 py-1.5"
+									className="text-muted-foreground hover:text-foreground hover:bg-accent/60 hover:shadow-sm transition-all duration-200 rounded-xl px-3 py-1.5"
 									title="Start a voice conversation (local Kokoro TTS)"
 								>
 									<AudioLines className="w-4 h-4 mr-2" />
@@ -729,15 +774,15 @@ function ChatInput({
 								type="button"
 								variant="ghost"
 								size="sm"
-								onClick={capture.toggleScreenshare}
+								onClick={visionSupported ? capture.toggleScreenshare : onVisionRequired}
 								className={cn(
 									"transition-all duration-200 rounded-xl px-3 py-1.5",
 									capture.mode === 'screen'
 										? "bg-primary/15 text-primary hover:bg-primary/20"
-										: "text-muted-foreground hover:text-foreground hover:bg-white/40 hover:shadow-sm"
+										: "text-muted-foreground hover:text-foreground hover:bg-accent/60 hover:shadow-sm",
+									!visionSupported && "opacity-50"
 								)}
 								title={!visionSupported ? "Screen share requires a vision-capable model" : capture.mode === 'screen' ? "Stop sharing screen" : "Share a screen or window with the model"}
-								disabled={!visionSupported}
 							>
 								<Monitor className="w-4 h-4" />
 							</Button>
@@ -749,15 +794,15 @@ function ChatInput({
 								type="button"
 								variant="ghost"
 								size="sm"
-								onClick={capture.toggleCamera}
+								onClick={visionSupported ? capture.toggleCamera : onVisionRequired}
 								className={cn(
 									"transition-all duration-200 rounded-xl px-3 py-1.5",
 									capture.mode === 'camera'
 										? "bg-primary/15 text-primary hover:bg-primary/20"
-										: "text-muted-foreground hover:text-foreground hover:bg-white/40 hover:shadow-sm"
+										: "text-muted-foreground hover:text-foreground hover:bg-accent/60 hover:shadow-sm",
+									!visionSupported && "opacity-50"
 								)}
 								title={!visionSupported ? "Camera requires a vision-capable model" : capture.mode === 'camera' ? "Turn camera off" : "Share your camera with the model"}
-								disabled={!visionSupported}
 							>
 								<Camera className="w-4 h-4" />
 							</Button>
@@ -820,7 +865,7 @@ function ChatInput({
 		{/* Fullscreen Image Modal */}
 		{fullScreenImage && (
 			<div 
-				className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 p-4 cursor-pointer"
+				className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 cursor-pointer"
 				onClick={() => setFullScreenImage(null)}
 			>
 				<img 
@@ -831,7 +876,7 @@ function ChatInput({
 				/>
 				<button
 					onClick={() => setFullScreenImage(null)}
-					className="absolute top-4 right-4 bg-black bg-opacity-50 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-opacity-70 transition-all"
+					className="absolute top-4 right-4 bg-black/50 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-black/70 transition-all"
 					aria-label="Close fullscreen image"
 				>
 					✕
