@@ -2101,6 +2101,54 @@ function Settings() {
             </Card>
 
             {/* Responses API & Connectors */}
+            {/* Screen share frames */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <span>Screen Share</span>
+                </CardTitle>
+                <CardDescription>
+                  How much of your screen the model sees during voice calls. Frames are still images, and each one costs roughly a thousand tokens.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="screenFramesPerTurn">Frames per held turn</Label>
+                    <Input
+                      id="screenFramesPerTurn"
+                      name="screenFramesPerTurn"
+                      type="number"
+                      min={1}
+                      max={12}
+                      step={1}
+                      value={settings.screenFramesPerTurn ?? 5}
+                      onChange={handleNumberChange}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      While you hold the floor, a frame is taken at the end of each phrase. Duplicates are dropped and this caps the total, always including the frame from when you send.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="screenFrameHistoryTurns">Turns that keep their screenshots</Label>
+                    <Input
+                      id="screenFrameHistoryTurns"
+                      name="screenFrameHistoryTurns"
+                      type="number"
+                      min={0}
+                      max={20}
+                      step={1}
+                      value={settings.screenFrameHistoryTurns ?? 2}
+                      onChange={handleNumberChange}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Older screenshots are replaced with a note in what is sent to the model. The chat still shows them.
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center space-x-2">

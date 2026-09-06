@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { SIG_SIZE } from '../lib/frameBank';
 
 // Screenshare/camera capture. While active, captureFrame() grabs the current
-// frame as a JPEG data URL (max 1280px wide) to attach to outgoing messages.
+// frame as a JPEG data URL to attach to outgoing messages. The send-time frame
+// defaults to 1920px wide so on-screen text stays legible to the model;
+// intermediate frames banked during a held turn ask for less.
 export function useMediaCapture({ onError } = {}) {
   const [mode, setMode] = useState(null); // null | 'screen' | 'camera'
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -125,19 +128,41 @@ export function useMediaCapture({ onError } = {}) {
     }
   }, [startCamera, stopCapture]);
 
-  const captureFrame = useCallback(() => {
+  const captureFrame = useCallback(({ maxWidth = 1920, quality = 0.75 } = {}) => {
     const video = videoRef.current;
     if (!modeRef.current || !video || video.readyState < 2) return null;
     const width = video.videoWidth;
     const height = video.videoHeight;
     if (!width || !height) return null;
-    const scale = Math.min(1, 1280 / width);
+    const scale = Math.min(1, maxWidth / width);
     const canvas = document.createElement('canvas');
     canvas.width = Math.round(width * scale);
     canvas.height = Math.round(height * scale);
     canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL('image/jpeg', 0.7);
+    return canvas.toDataURL('image/jpeg', quality);
   }, []);
+
+  // Same grab plus a tiny grayscale thumbnail, so callers can tell whether
+  // two frames show the same screen without decoding the JPEG.
+  const captureFrameWithSignature = useCallback(
+    (opts) => {
+      const url = captureFrame(opts);
+      if (!url) return null;
+      const video = videoRef.current;
+      const canvas = document.createElement('canvas');
+      canvas.width = SIG_SIZE;
+      canvas.height = SIG_SIZE;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(video, 0, 0, SIG_SIZE, SIG_SIZE);
+      const rgba = ctx.getImageData(0, 0, SIG_SIZE, SIG_SIZE).data;
+      const sig = new Uint8Array(SIG_SIZE * SIG_SIZE);
+      for (let i = 0; i < sig.length; i += 1) {
+        sig[i] = (rgba[i * 4] * 0.299 + rgba[i * 4 + 1] * 0.587 + rgba[i * 4 + 2] * 0.114) | 0;
+      }
+      return { url, sig };
+    },
+    [captureFrame]
+  );
 
   const getPreviewStream = useCallback(() => streamRef.current, []);
 
@@ -153,6 +178,7 @@ export function useMediaCapture({ onError } = {}) {
     toggleCamera,
     stopCapture,
     captureFrame,
+    captureFrameWithSignature,
     getPreviewStream,
   };
 }

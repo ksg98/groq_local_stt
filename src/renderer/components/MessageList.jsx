@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import Message from './Message';
 import MarkdownRenderer from './MarkdownRenderer';
 
-function MessageList({ messages = [], onToolCallExecute, onRemoveLastMessage, onReloadFromMessage, loading, onActionsVisible }) {
+function MessageList({ messages = [], onToolCallExecute, onRemoveLastMessage, onReloadFromMessage, onRewindToMessage, loading, onActionsVisible }) {
   const [fullScreenImage, setFullScreenImage] = useState(null);
 
   // Effect to handle Escape key for closing fullscreen image
@@ -155,6 +155,7 @@ function MessageList({ messages = [], onToolCallExecute, onRemoveLastMessage, on
             messageIndex={originalIndex}
             onToolCallExecute={onToolCallExecute}
             onReloadFromMessage={onReloadFromMessage}
+            onRewindToMessage={onRewindToMessage}
             allMessages={messages} // Pass all messages for the Message component to find tool results
             isLastMessage={index === displayMessages.length - 1}
             loading={loading}

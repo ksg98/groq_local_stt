@@ -8,6 +8,7 @@ import ChatHistorySidebar from './components/ChatHistorySidebar';
 import ScreenSourcePicker from './components/ScreenSourcePicker';
 import { useChat } from './context/ChatContext'; // Import useChat hook
 import { useVoiceAgent } from './hooks/useVoiceAgent';
+import { buildFrameParts, mergeFinalFrame, pruneHistoryImages } from './lib/frameBank';
 import { useMediaCapture } from './hooks/useMediaCapture';
 // Import shared model definitions - REMOVED
 // import { MODEL_CONTEXT_SIZES } from '../../shared/models';
@@ -117,6 +118,25 @@ function App() {
   // --- Cancellation State ---
   const cancelledRef = useRef(false); // Track if current operation is cancelled
   const loadingRef = useRef(false); // Track loading state for cleanup
+  // Screen-share frame policy from Settings: frames per held turn, and how
+  // many recent turns keep their images in the API payload.
+  const frameSettingsRef = useRef({ perTurn: 5, historyTurns: 2 });
+  const frameBudgetRef = useRef(5);
+  useEffect(() => {
+    const load = () =>
+      window.electron
+        ?.getSettings?.()
+        .then((s) => {
+          const perTurn = Math.max(1, Number(s?.screenFramesPerTurn) || 5);
+          const historyTurns = Math.max(0, Number(s?.screenFrameHistoryTurns ?? 2) || 0);
+          frameSettingsRef.current = { perTurn, historyTurns };
+          frameBudgetRef.current = perTurn;
+        })
+        .catch(() => {});
+    load();
+    window.addEventListener('focus', load);
+    return () => window.removeEventListener('focus', load);
+  }, []);
   // --- End Cancellation State ---
 
   // --- Voice Agent / Capture refs ---
@@ -125,6 +145,13 @@ function App() {
   const voiceAgentRef = useRef(null);
   const captureRef = useRef(null);
   // --- End Voice Agent / Capture refs ---
+
+  // Rewind: drop everything after a message, without resending anything.
+  // The truncated history is saved through the same path as any edit.
+  const handleRewindToMessage = (messageIndex) => {
+    if (loadingRef.current) handleStopGeneration();
+    setMessages((prev) => (messageIndex < prev.length - 1 ? prev.slice(0, messageIndex + 1) : prev));
+  };
 
   const handleRemoveLastMessage = () => {
     setMessages(prev => {
@@ -770,7 +797,9 @@ function App() {
         setMessages(prev => [...prev, assistantPlaceholder]);
 
         // Start streaming chat
-        const streamHandler = window.electron.startChatStream(turnMessages, selectedModel, { reasoningEffort });
+        // Old screenshots leave the payload here; the chat on screen keeps them
+        const apiMessages = pruneHistoryImages(turnMessages, frameSettingsRef.current.historyTurns);
+        const streamHandler = window.electron.startChatStream(apiMessages, selectedModel, { reasoningEffort });
 
             // Collect the final message data
         let finalAssistantData = {
@@ -1184,19 +1213,23 @@ function App() {
   };
 
   // Handle sending message (text or structured content with images)
-  const handleSendMessage = async (content) => {
+  const handleSendMessage = async (content, extra = {}) => {
     // Check if content is structured (array) or just text (string)
     const isStructuredContent = Array.isArray(content);
     const hasContent = isStructuredContent ? content.some(part => (part.type === 'text' && part.text.trim()) || part.type === 'image_url') : content.trim();
 
     if (!hasContent) return;
 
-    // Attach the current screenshare/camera frame while capture is active
+    // While screen/camera capture is active, attach what's on screen now. A
+    // released held turn also brings the frames banked at each utterance, so
+    // the model sees the screens that were talked about, not just the last.
     if (captureRef.current?.mode) {
-      const frame = captureRef.current.captureFrame();
-      if (frame) {
+      const held = Array.isArray(extra.frames) ? extra.frames : [];
+      const finalShot = captureRef.current.captureFrameWithSignature({ maxWidth: 1920, quality: 0.75 });
+      const frames = mergeFinalFrame(held, finalShot, extra.heldMs);
+      if (frames.length) {
         const parts = isStructuredContent ? [...content] : [{ type: 'text', text: content }];
-        parts.push({ type: 'image_url', image_url: { url: frame } });
+        parts.push(...buildFrameParts(frames));
         content = parts;
       }
     }
@@ -1355,10 +1388,17 @@ function App() {
   captureRef.current = capture;
 
   const voiceAgent = useVoiceAgent({
-    onTranscript: (text) => handleSendMessage(text),
+    onTranscript: (text, extra) => handleSendMessage(text, extra),
     onStopGeneration: handleStopGeneration,
     loadingRef,
     onError: (message) => showSessionError('[VoiceAgent]', message),
+    // Intermediate frames are context, not the thing being pointed at, so
+    // they go smaller; the send-time frame keeps full size.
+    captureHeldFrame: () =>
+      captureRef.current?.mode
+        ? captureRef.current.captureFrameWithSignature({ maxWidth: 1024, quality: 0.6 })
+        : null,
+    frameBudgetRef,
   });
   voiceAgentRef.current = voiceAgent;
 
@@ -1926,6 +1966,7 @@ function App() {
                     onToolCallExecute={executeToolCall} 
                     onRemoveLastMessage={handleRemoveLastMessage}
                     onReloadFromMessage={handleReloadFromMessage}
+                    onRewindToMessage={handleRewindToMessage}
                     loading={loading}
                     onActionsVisible={scrollToBottom}
                   />

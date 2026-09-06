@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { MicVAD, utils } from '@ricky0123/vad-web';
 import { SentenceChunker } from '../lib/sentenceChunker';
 import { TtsPlayer } from '../lib/ttsPlayer';
+import { FrameBank } from '../lib/frameBank';
 
 // Static assets copied by vite-plugin-static-copy (dev server and dist build);
 // in the packaged app they are served through the app:// scheme.
@@ -16,12 +17,23 @@ const DEFAULT_SPEED = 1.0;
  * auto-send transcript; streamed assistant text -> Kokoro TTS with barge-in.
  *
  * @param {object} params
- * @param {(text: string) => void} params.onTranscript  called with each final user utterance
+ * @param {(text: string, extra?: {frames?: object[], heldMs?: number}) => void} params.onTranscript
+ *        called with each final user utterance; a released held turn also carries the frames banked during it
+ * @param {() => ({url: string, sig: Uint8Array}|null)} [params.captureHeldFrame]
+ *        grabs the current screen/camera frame; called at the end of each utterance while the floor is held
+ * @param {{current: number}} [params.frameBudgetRef]  max frames per held turn, including the send-time frame
  * @param {() => void} params.onStopGeneration          cancels the in-flight chat stream (barge-in)
  * @param {{current: boolean}} params.loadingRef        ref mirroring the chat `loading` state
  * @param {(message: string) => void} [params.onError]
  */
-export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onError }) {
+export function useVoiceAgent({
+  onTranscript,
+  onStopGeneration,
+  loadingRef,
+  onError,
+  captureHeldFrame,
+  frameBudgetRef,
+}) {
   const [supported, setSupported] = useState(false);
   const [active, setActive] = useState(false);
   const [agentState, setAgentState] = useState('idle'); // idle|starting|listening|transcribing|thinking|speaking|error
@@ -44,6 +56,9 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
   // Segments that ended while the floor was held and are still transcribing.
   // Release waits these out so the tail of a sentence isn't split off.
   const pendingHoldRef = useRef(0);
+  // Frames banked during the held turn, one offered per utterance
+  const frameBankRef = useRef(null);
+  const holdStartRef = useRef(0);
   const ttsStartedRef = useRef(false);
   const vadRef = useRef(null);
   const playerRef = useRef(null);
@@ -57,8 +72,8 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
   const errorRef = useRef(false);
 
   // keep latest callbacks without re-initializing the VAD
-  const callbacksRef = useRef({ onTranscript, onStopGeneration, onError });
-  callbacksRef.current = { onTranscript, onStopGeneration, onError };
+  const callbacksRef = useRef({ onTranscript, onStopGeneration, onError, captureHeldFrame });
+  callbacksRef.current = { onTranscript, onStopGeneration, onError, captureHeldFrame };
 
   // tts-supported is provider-aware (kokoro: Apple Silicon + uv; openai: API
   // key) — re-check when the window regains focus so Settings changes apply.
@@ -163,7 +178,15 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
       // of the segment — not after transcription, by which time the floor may
       // already have been released.
       const bank = holdingRef.current;
-      if (bank) pendingHoldRef.current += 1;
+      if (bank) {
+        pendingHoldRef.current += 1;
+        // Utterance boundary: what's on screen right now is what this phrase
+        // was about. Grab it before transcription, which takes a moment.
+        const shot = callbacksRef.current.captureHeldFrame?.();
+        if (shot) {
+          frameBankRef.current?.add({ ...shot, at: (Date.now() - holdStartRef.current) / 1000 });
+        }
+      }
       transcribingRef.current = true;
       refreshState();
       try {
@@ -208,6 +231,7 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
     setHolding(false);
     heldPartsRef.current = [];
     pendingHoldRef.current = 0;
+    frameBankRef.current = null;
     setHeldText('');
     const vad = vadRef.current;
     vadRef.current = null;
@@ -407,6 +431,11 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
       heldPartsRef.current = [];
       pendingHoldRef.current = 0;
       setHeldText('');
+      holdStartRef.current = Date.now();
+      // One slot of the budget is reserved for the send-time frame; a budget
+      // of one means "only that frame", so nothing is banked at all.
+      const bankBudget = (frameBudgetRef?.current ?? 5) - 1;
+      frameBankRef.current = bankBudget >= 1 ? new FrameBank({ budget: bankBudget }) : null;
       // Taking the floor also takes it back from the agent mid-sentence
       bargeIn();
       // Holding implies listening; un-mute the mic so the button can't lie
@@ -423,12 +452,15 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
           await new Promise((resolve) => setTimeout(resolve, 100));
         }
         const text = heldPartsRef.current.join(' ').trim();
+        const frames = frameBankRef.current?.take() || [];
+        const heldMs = Date.now() - holdStartRef.current;
         heldPartsRef.current = [];
         pendingHoldRef.current = 0;
+        frameBankRef.current = null;
         setHeldText('');
         if (!text || !activeRef.current) return;
         const idle = await waitForIdle(4000);
-        if (idle && activeRef.current) callbacksRef.current.onTranscript?.(text);
+        if (idle && activeRef.current) callbacksRef.current.onTranscript?.(text, { frames, heldMs });
         else console.warn('[VoiceAgent] Chat still busy, dropping held utterance:', text);
       })();
     }

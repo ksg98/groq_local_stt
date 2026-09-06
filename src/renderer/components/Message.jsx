@@ -4,9 +4,9 @@ import MarkdownRenderer from './MarkdownRenderer';
 import { TextShimmer } from './ui/text-shimmer';
 import { badgeVariants } from './ui/badge';
 import { cn } from '../lib/utils';
-import { Zap } from 'lucide-react';
+import { Zap, Undo2 } from 'lucide-react';
 
-function Message({ message, children, onToolCallExecute, allMessages, isLastMessage, messageIndex, onReloadFromMessage, loading, onActionsVisible, hideReasoningUI = false, combinedReasoning = null, combinedReasoningDuration = null }) {
+function Message({ message, children, onToolCallExecute, allMessages, isLastMessage, messageIndex, onReloadFromMessage, onRewindToMessage, loading, onActionsVisible, hideReasoningUI = false, combinedReasoning = null, combinedReasoningDuration = null }) {
   const { role, tool_calls, reasoning, isStreaming, executed_tools, liveReasoning, liveExecutedTools, reasoningSummaries, reasoningDuration, usage } = message;
   const [showReasoning, setShowReasoning] = useState(false);
   const [showExecutedTools, setShowExecutedTools] = useState(false);
@@ -94,8 +94,12 @@ function Message({ message, children, onToolCallExecute, allMessages, isLastMess
   // Apply background only for user messages
   const bubbleStyle = isUser ? 'glass-card' : ''; // No background for assistant/system
   const bubbleClasses = isUser
-    ? `relative overflow-x-auto px-4 py-3 rounded-lg max-w-xl max-h-[500px] overflow-y-auto cursor-pointer ${bubbleStyle}`
-    : `relative w-full`; // Assistant bubbles full-width, no background, text wraps naturally
+    ? `group/msg relative overflow-x-auto px-4 py-3 rounded-lg max-w-xl max-h-[500px] overflow-y-auto cursor-pointer ${bubbleStyle}`
+    : `group/msg relative w-full`; // Assistant bubbles full-width, no background, text wraps naturally
+  // Rewind is offered on every settled message except the last one, where it
+  // would be a no-op.
+  const canRewind =
+    typeof onRewindToMessage === 'function' && messageIndex !== undefined && !isLastMessage && !loading && !isStreamingMessage;
   const wrapperClasses = `message-content-wrapper ${isUser ? 'text-foreground' : 'text-foreground'} break-words text-sm overflow-hidden`; // Token text color for both, use break-words, smaller font, contain overflow
 
   const toggleReasoning = () => setShowReasoning(!showReasoning);
@@ -132,6 +136,20 @@ function Message({ message, children, onToolCallExecute, allMessages, isLastMess
   return (
     <div className={messageClasses}>
       <div className={bubbleClasses}>
+        {canRewind && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRewindToMessage(messageIndex);
+            }}
+            className="absolute top-1.5 right-1.5 z-10 p-1 rounded-md glass-card text-muted-foreground hover:text-foreground opacity-0 group-hover/msg:opacity-100 focus:opacity-100 transition-opacity"
+            title="Rewind to here — remove everything after this message"
+            aria-label="Rewind conversation to this message"
+          >
+            <Undo2 className="w-3.5 h-3.5" />
+          </button>
+        )}
         {isStreamingMessage && (
           <div className="streaming-indicator mb-1">
             <span className="dot-1"></span>
