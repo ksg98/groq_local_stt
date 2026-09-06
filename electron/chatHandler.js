@@ -47,24 +47,8 @@ function validateApiKey(settings) {
 
 function determineModel(model, settings, modelContextSizes) {
     const modelToUse = model || settings.model || "llama-3.3-70b-versatile";
-    const modelInfo = modelContextSizes[modelToUse] || modelContextSizes['default'] || { context: 8192, vision_supported: false };
+    const modelInfo = modelContextSizes[modelToUse] || modelContextSizes['default'] || { context: 8192 };
     return { modelToUse, modelInfo };
-}
-
-function checkVisionSupport(messages, modelInfo, modelToUse, event) {
-    const hasImages = messages.some(msg =>
-        msg.role === 'user' &&
-        Array.isArray(msg.content) &&
-        msg.content.some(part => part.type === 'image_url')
-    );
-
-    if (hasImages && !modelInfo.vision_supported) {
-        console.warn(`Attempting to use images with non-vision model: ${modelToUse}`);
-        event.sender.send('chat-stream-error', { error: `The selected model (${modelToUse}) does not support image inputs. Please select a vision-capable model.` });
-        return false; // Return false to indicate vision check failed
-    }
-    
-    return true; // Return true to indicate vision check passed
 }
 
 function prepareTools(discoveredTools, isResponsesApi = false) {
@@ -1530,14 +1514,9 @@ async function handleChatStream(event, messages, model, settings, modelContextSi
         if (!isLocalModel) {
             validateApiKey(settings);
         }
-        const { modelToUse, modelInfo } = determineModel(model, settings, modelContextSizes);
-        const visionCheckPassed = checkVisionSupport(messages, modelInfo, modelToUse, event);
-
-        // If vision check failed, return early
-        if (!visionCheckPassed) {
-            cleanupStream(streamId);
-            return;
-        }
+        // Images are always forwarded; a model that can't take them rejects
+        // the request itself and that error is surfaced like any other.
+        const { modelToUse } = determineModel(model, settings, modelContextSizes);
 
         const groqConfig = { apiKey: settings.GROQ_API_KEY };
 

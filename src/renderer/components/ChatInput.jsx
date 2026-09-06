@@ -11,7 +11,6 @@ function ChatInput({
 	onSendMessage,
 	onStopGeneration,
 	loading = false,
-	visionSupported = false,
 	models = [],
 	selectedModel = "",
 	onModelChange,
@@ -21,7 +20,6 @@ function ChatInput({
 	onReasoningEffortChange,
 	voiceAgent = null,
 	capture = null,
-	onVisionRequired,
 }) {
 	const [message, setMessage] = useState("");
 	const [suggestion, setSuggestion] = useState("");
@@ -137,14 +135,6 @@ function ChatInput({
 	const handleFileChange = (e) => {
 		const selectedFiles = Array.from(e.target.files);
 		const remainingSlots = 5 - files.length;
-
-		// Check if any images are being uploaded with a non-vision model
-		const hasImages = selectedFiles.some(file => file.type.startsWith("image/"));
-		if (hasImages && !visionSupported) {
-			alert("The selected model does not support image inputs. Please select a vision-capable model or upload text files only.");
-			if (fileInputRef.current) fileInputRef.current.value = "";
-			return;
-		}
 
 		if (selectedFiles.length > remainingSlots) {
 			alert(
@@ -292,10 +282,6 @@ function ChatInput({
 			}
 			const dataUrl = payload?.dataUrl;
 			if (!dataUrl) return;
-			if (!visionSupported) {
-				alert("The selected model does not support image inputs. Please select a vision-capable model to attach screenshots.");
-				return;
-			}
 			setFiles((prev) => {
 				if (prev.length >= 5) {
 					alert("You can attach at most 5 files.");
@@ -312,7 +298,7 @@ function ChatInput({
 			textareaRef.current?.focus();
 		});
 		return unsubscribe;
-	}, [visionSupported]);
+	}, []);
 
 	useEffect(() => {
 		const handleClearShortcut = (event) => {
@@ -631,7 +617,7 @@ function ChatInput({
 								size="sm"
 								onClick={() => fileInputRef.current?.click()}
 								className="text-muted-foreground hover:text-foreground hover:bg-accent/60 hover:shadow-sm transition-all duration-200 rounded-xl px-3 py-1.5"
-								title={visionSupported ? "Upload file or image (max 5)" : "Upload files (images require vision-capable model)"}
+								title="Upload file or image (max 5)"
 								disabled={loading}
 							>
 								<ImagePlus className="w-4 h-4 mr-2" />
@@ -642,7 +628,7 @@ function ChatInput({
 							type="file"
 							ref={fileInputRef}
 							onChange={handleFileChange}
-							accept={visionSupported ? "*/*" : ".txt,.md,.json,.csv,.xml,.html,.css,.js,.ts,.py,.java,.cpp,.c,.h,.log,.sql"}
+							accept="*/*"
 							multiple
 							style={{ display: "none" }}
 							disabled={loading || files.length >= 5}
@@ -774,15 +760,14 @@ function ChatInput({
 								type="button"
 								variant="ghost"
 								size="sm"
-								onClick={visionSupported ? capture.toggleScreenshare : onVisionRequired}
+								onClick={capture.toggleScreenshare}
 								className={cn(
 									"transition-all duration-200 rounded-xl px-3 py-1.5",
 									capture.mode === 'screen'
 										? "bg-primary/15 text-primary hover:bg-primary/20"
-										: "text-muted-foreground hover:text-foreground hover:bg-accent/60 hover:shadow-sm",
-									!visionSupported && "opacity-50"
+										: "text-muted-foreground hover:text-foreground hover:bg-accent/60 hover:shadow-sm"
 								)}
-								title={!visionSupported ? "Screen share requires a vision-capable model" : capture.mode === 'screen' ? "Stop sharing screen" : "Share a screen or window with the model"}
+								title={capture.mode === 'screen' ? "Stop sharing screen" : "Share a screen or window with the model"}
 							>
 								<Monitor className="w-4 h-4" />
 							</Button>
@@ -794,15 +779,14 @@ function ChatInput({
 								type="button"
 								variant="ghost"
 								size="sm"
-								onClick={visionSupported ? capture.toggleCamera : onVisionRequired}
+								onClick={capture.toggleCamera}
 								className={cn(
 									"transition-all duration-200 rounded-xl px-3 py-1.5",
 									capture.mode === 'camera'
 										? "bg-primary/15 text-primary hover:bg-primary/20"
-										: "text-muted-foreground hover:text-foreground hover:bg-accent/60 hover:shadow-sm",
-									!visionSupported && "opacity-50"
+										: "text-muted-foreground hover:text-foreground hover:bg-accent/60 hover:shadow-sm"
 								)}
-								title={!visionSupported ? "Camera requires a vision-capable model" : capture.mode === 'camera' ? "Turn camera off" : "Share your camera with the model"}
+								title={capture.mode === 'camera' ? "Turn camera off" : "Share your camera with the model"}
 							>
 								<Camera className="w-4 h-4" />
 							</Button>

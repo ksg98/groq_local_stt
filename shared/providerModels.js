@@ -205,6 +205,26 @@ function serverReportedEfforts(model) {
   return null;
 }
 
+// Vision support the server itself publishes, if any. Plain /v1/models carries
+// only ids, but LM Studio, OpenRouter-style gateways and similar expose it as a
+// capabilities list/object, an input-modalities list, or a vlm type. Returns
+// null when the server says nothing, so the caller can fall back to the name.
+function serverReportedVision(model) {
+  if (!model || typeof model === 'string') return null;
+  const flag = model.vision_supported ?? model.supports_vision ?? model.capabilities?.vision;
+  if (typeof flag === 'boolean') return flag;
+  if (Array.isArray(model.capabilities)) {
+    return model.capabilities.some((c) => /vision|image/i.test(String(c)));
+  }
+  const modalities =
+    model.architecture?.input_modalities ?? model.input_modalities ?? model.modalities;
+  if (Array.isArray(modalities)) {
+    return modalities.some((m) => /image|vision/i.test(String(m)));
+  }
+  if (typeof model.type === 'string') return /vlm/i.test(model.type);
+  return null;
+}
+
 // Fallback when the server publishes no capability metadata: infer effort
 // levels from the id it reports (e.g. a Codex CLI proxy serving gpt-5.x).
 // Returns null for non-reasoning models, which then show no effort selector.
@@ -274,30 +294,31 @@ async function fetchLocalLlmModels(baseUrl, apiKey) {
     .map((m) => ({ meta: m, id: typeof m === 'string' ? m : m?.id }))
     .filter((e) => e.id);
 
-  // Effort levels, most authoritative source first:
+  // Vision and effort levels, most authoritative source first:
   //   1. metadata the server publishes alongside the model
   //   2. the server's own validation error (asked live, per model id)
   //   3. inference from the id, when the server tells us nothing
   const resolved = await Promise.all(
     entries.map(async ({ meta, id }) => {
+      const vision = serverReportedVision(meta) ?? visionForModelName(id);
       const published = serverReportedEfforts(meta);
-      if (published) return { id, efforts: published };
+      if (published) return { id, vision, efforts: published };
       const lower = id.toLowerCase();
-      if (NON_CHAT_PATTERNS.some((p) => lower.includes(p))) return { id, efforts: null };
+      if (NON_CHAT_PATTERNS.some((p) => lower.includes(p))) return { id, vision, efforts: null };
       const probed = await probeEffortLevels(baseUrl, apiKey, id);
       // A server that accepts 'none' can turn thinking off entirely; it is
       // commonly omitted from the advertised list, so offer it up front.
-      if (probed) return { id, efforts: probed.includes('none') ? probed : ['none', ...probed] };
-      return { id, efforts: localEffortsForModel(id) };
+      if (probed) return { id, vision, efforts: probed.includes('none') ? probed : ['none', ...probed] };
+      return { id, vision, efforts: localEffortsForModel(id) };
     })
   );
 
   const models = {};
-  for (const { id, efforts } of resolved) {
+  for (const { id, vision, efforts } of resolved) {
     models[`${LOCAL_MODEL_PREFIX}${id}`] = {
       displayName: `${id} (Local)`,
       context: 32768, // /v1/models doesn't report context; override via Custom Models if needed
-      vision_supported: visionForModelName(id),
+      vision_supported: vision,
       builtin_tools_supported: false,
       provider: 'local',
       max_tokens_default: 8192,
@@ -473,14 +494,24 @@ function openAIVisionForModel(id) {
 
 // Fallback for providers whose /v1/models carries no capability info (Groq,
 // local servers) — vision is inferred from the name: OpenAI-family ids (Codex
-// CLI proxies serve ChatGPT models) plus the common open multimodal families.
+// CLI proxies serve ChatGPT models), the natively multimodal frontier families
+// (Gemini, Claude), plus the common open multimodal families.
 // A wrong guess can be corrected per model via Custom Models in Settings.
+const VISION_NAME_PATTERN = new RegExp(
+  [
+    '(^|[-_./: ])vl([-_./: ]|$)', // qwen2.5-vl, kimi-vl, deepseek-vl, …
+    'vision', 'llava', 'pixtral', 'multimodal', 'omni', 'moondream', 'smolvlm',
+    'minicpm', 'internvl', 'idefics', 'paligemma', 'molmo', 'gemma-?3',
+    'llama[-_. ]?4', 'maverick', 'scout',
+    'gemini', 'claude', 'grok-?[4-9]',
+    'mistral-(small|medium|large)-?3', 'glm-?4(\\.\\d+)?v',
+  ].join('|')
+);
+
 function visionForModelName(id) {
   const lower = id.toLowerCase();
   if (openAIVisionForModel(lower)) return true;
-  return /(^|[-_./: ])vl([-_./: ]|$)|vision|llava|pixtral|multimodal|omni|moondream|smolvlm|minicpm|internvl|gemma-3|llama[-_. ]?4|maverick|scout/.test(
-    lower
-  );
+  return VISION_NAME_PATTERN.test(lower);
 }
 
 function prettifyOpenAIModelId(id) {

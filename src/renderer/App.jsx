@@ -100,8 +100,6 @@ function App() {
   const [modelFilter, setModelFilter] = useState(''); // State for model filter setting
   const [modelFilterExclude, setModelFilterExclude] = useState(''); // State for model filter exclude setting
 
-  // State for current model's vision capability
-  const [visionSupported, setVisionSupported] = useState(false);
   // Add state to track if initial model/settings load is complete
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   // Track if using Responses API (needed for chat history compatibility)
@@ -709,17 +707,6 @@ function App() {
     }
   };
 
-  // Update vision support when selectedModel or modelConfigs changes
-  useEffect(() => {
-    if (modelConfigs && selectedModel && modelConfigs[selectedModel]) {
-      const capabilities = modelConfigs[selectedModel] || modelConfigs['default'];
-      setVisionSupported(capabilities.vision_supported);
-    } else {
-      // Handle case where configs aren't loaded yet or model is invalid
-      setVisionSupported(false);
-    }
-  }, [selectedModel, modelConfigs]);
-
   // Keep the reasoning effort valid for the selected model (each model
   // reports its own supported effort levels via the dynamic model configs)
   useEffect(() => {
@@ -1205,8 +1192,7 @@ function App() {
     if (!hasContent) return;
 
     // Attach the current screenshare/camera frame while capture is active
-    // (vision-capable models only)
-    if (captureRef.current?.mode && visionSupported) {
+    if (captureRef.current?.mode) {
       const frame = captureRef.current.captureFrame();
       if (frame) {
         const parts = isStructuredContent ? [...content] : [{ type: 'text', text: content }];
@@ -1367,14 +1353,6 @@ function App() {
     onError: (message) => showSessionError('[Capture]', message),
   });
   captureRef.current = capture;
-
-  const handleVisionRequired = () => {
-    const modelName = modelConfigs?.[selectedModel]?.displayName || selectedModel;
-    showSessionError(
-      '[Capture]',
-      `${modelName} can't see images. Switch to a vision-capable model (e.g. Llama 4 Scout or Maverick) to share your screen or camera.`
-    );
-  };
 
   const voiceAgent = useVoiceAgent({
     onTranscript: (text) => handleSendMessage(text),
@@ -1923,7 +1901,6 @@ function App() {
                     onSendMessage={handleSendMessage}
                     onStopGeneration={handleStopGeneration}
                     loading={loading}
-                    visionSupported={visionSupported}
                     models={sortedModels}
                     selectedModel={selectedModel}
                     onModelChange={setSelectedModel}
@@ -1933,7 +1910,6 @@ function App() {
                     onReasoningEffortChange={setReasoningEffort}
                     voiceAgent={voiceAgent}
                     capture={capture}
-                    onVisionRequired={handleVisionRequired}
                   />
                 </div>
               </div>
@@ -1961,7 +1937,6 @@ function App() {
                     onSendMessage={handleSendMessage}
                     onStopGeneration={handleStopGeneration}
                     loading={loading}
-                    visionSupported={visionSupported}
                     models={sortedModels}
                     selectedModel={selectedModel}
                     onModelChange={setSelectedModel}
@@ -1971,7 +1946,6 @@ function App() {
                     onReasoningEffortChange={setReasoningEffort}
                     voiceAgent={voiceAgent}
                     capture={capture}
-                    onVisionRequired={handleVisionRequired}
                   />
                 </div>
               </div>

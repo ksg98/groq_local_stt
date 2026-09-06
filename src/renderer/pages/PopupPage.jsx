@@ -162,7 +162,6 @@ const PopupPage = () => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [files, setFiles] = useState([]);
   const [fullScreenImage, setFullScreenImage] = useState(null);
-  const [visionSupported, setVisionSupported] = useState(false);
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -274,9 +273,6 @@ const PopupPage = () => {
       
       if (sortedModels.length > 0) {
         setSelectedModel(sortedModels[0]);
-        // Check if the selected model supports vision
-        const modelInfo = configs[sortedModels[0]];
-        setVisionSupported(modelInfo?.vision_supported || false);
       }
 
       // Try to get any existing captured context
@@ -289,22 +285,8 @@ const PopupPage = () => {
     }
   };
 
-  const handleModelChange = async (newModel) => {
+  const handleModelChange = (newModel) => {
     setSelectedModel(newModel);
-    
-    try {
-      // Update vision support based on the new model
-      const modelConfigs = await window.electron.getModelConfigs();
-      const modelInfo = modelConfigs[newModel];
-      setVisionSupported(modelInfo?.vision_supported || false);
-      
-      // Clear any uploaded files if the new model doesn't support vision
-      if (!(modelInfo?.vision_supported || false)) {
-        setFiles([]);
-      }
-    } catch (error) {
-      console.error('Error updating model:', error);
-    }
   };
 
   const scrollToBottom = () => {
@@ -506,14 +488,6 @@ const PopupPage = () => {
   const handleFileChange = (e) => {
     const selectedFiles = Array.from(e.target.files);
     const remainingSlots = 5 - files.length;
-
-    // Check if any images are being uploaded with a non-vision model
-    const hasImages = selectedFiles.some(file => file.type.startsWith("image/"));
-    if (hasImages && !visionSupported) {
-      alert("The selected model does not support image inputs. Please select a vision-capable model or upload text files only.");
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      return;
-    }
 
     if (selectedFiles.length > remainingSlots) {
       alert(
@@ -761,15 +735,9 @@ const PopupPage = () => {
                 variant="ghost" 
                 size="icon"
                 onClick={() => fileInputRef.current?.click()}
-                className={cn(
-                  "h-9 w-9 shrink-0 rounded-xl transition-all mb-1 duration-200 hover:scale-105",
-                  visionSupported 
-                    ? "text-muted-foreground hover:text-foreground hover:bg-accent/50" 
-                    : "text-muted-foreground/50 cursor-not-allowed"
-                )}
+                className="h-9 w-9 shrink-0 rounded-xl transition-all mb-1 duration-200 hover:scale-105 text-muted-foreground hover:text-foreground hover:bg-accent/50"
                 style={{ WebkitAppRegion: 'no-drag' }}
-                title={visionSupported ? "Upload image (max 5)" : "Image upload not supported by this model"}
-                disabled={!visionSupported}
+                title="Upload image (max 5)"
               >
                 <ImagePlus size={18} />
               </Button>
