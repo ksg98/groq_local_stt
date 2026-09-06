@@ -30,10 +30,20 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
   const [muted, setMuted] = useState(() => localStorage.getItem('voice_agent_muted') === 'true');
   // Mic mute = pause the VAD (stop listening) without ending the session. Transient.
   const [micMuted, setMicMuted] = useState(false);
+  // Hold the floor = keep listening but never end the turn on silence, so long
+  // pauses for thinking don't hand the conversation back. Released manually.
+  const [holding, setHolding] = useState(false);
+  // Text captured while holding, joined and sent as one utterance on release
+  const [heldText, setHeldText] = useState('');
 
   const activeRef = useRef(false);
   const mutedRef = useRef(muted);
   const micMutedRef = useRef(false);
+  const holdingRef = useRef(false);
+  const heldPartsRef = useRef([]);
+  // Segments that ended while the floor was held and are still transcribing.
+  // Release waits these out so the tail of a sentence isn't split off.
+  const pendingHoldRef = useRef(0);
   const ttsStartedRef = useRef(false);
   const vadRef = useRef(null);
   const playerRef = useRef(null);
@@ -100,6 +110,9 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
   const deriveState = useCallback(() => {
     if (!activeRef.current) return 'idle';
     if (errorRef.current) return 'error';
+    // Segments still transcribing in the background are not worth showing —
+    // while the floor is held the only thing happening is that you're talking.
+    if (holdingRef.current) return 'holding';
     if (speakingRef.current) return 'speaking';
     if (transcribingRef.current) return 'transcribing';
     if (!ttsReadyRef.current && !mutedRef.current) return 'starting';
@@ -146,6 +159,11 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
   const handleSpeechEnd = useCallback(
     async (audio) => {
       if (!activeRef.current) return;
+      // Whether this segment belongs to a held turn is decided now, at the end
+      // of the segment — not after transcription, by which time the floor may
+      // already have been released.
+      const bank = holdingRef.current;
+      if (bank) pendingHoldRef.current += 1;
       transcribingRef.current = true;
       refreshState();
       try {
@@ -156,7 +174,12 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
           { format: 'wav', response_format: 'verbose_json' }
         );
         const text = result?.text?.trim();
-        if (text && activeRef.current) {
+        if (text && activeRef.current && bank) {
+          // Holding the floor: bank this segment and keep listening. Silence
+          // between segments is dropped, which is what we want in the prompt.
+          heldPartsRef.current.push(text);
+          setHeldText(heldPartsRef.current.join(' '));
+        } else if (text && activeRef.current) {
           const idle = await waitForIdle(4000);
           if (idle && activeRef.current) {
             callbacksRef.current.onTranscript?.(text);
@@ -168,6 +191,7 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
         console.error('[VoiceAgent] Transcription failed:', error);
         callbacksRef.current.onError?.(error.message || 'Transcription failed');
       } finally {
+        if (bank) pendingHoldRef.current = Math.max(0, pendingHoldRef.current - 1);
         transcribingRef.current = false;
         refreshState();
       }
@@ -180,6 +204,11 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
     setActive(false);
     micMutedRef.current = false;
     setMicMuted(false);
+    holdingRef.current = false;
+    setHolding(false);
+    heldPartsRef.current = [];
+    pendingHoldRef.current = 0;
+    setHeldText('');
     const vad = vadRef.current;
     vadRef.current = null;
     if (vad) {
@@ -360,10 +389,51 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
     const next = !micMutedRef.current;
     micMutedRef.current = next;
     setMicMuted(next);
+    // A held turn survives the mic going quiet: the banked text is only sent
+    // when the floor is released, never as a side effect of muting.
     if (next) vadRef.current?.pause();
     else vadRef.current?.start();
     refreshState();
   }, [refreshState]);
+
+  // Hold the floor: while on, silence never ends your turn — everything you
+  // say is banked and sent as a single message when you release it. Lets you
+  // stop mid-thought without the agent jumping in.
+  const toggleHold = useCallback(() => {
+    const next = !holdingRef.current;
+    holdingRef.current = next;
+    setHolding(next);
+    if (next) {
+      heldPartsRef.current = [];
+      pendingHoldRef.current = 0;
+      setHeldText('');
+      // Taking the floor also takes it back from the agent mid-sentence
+      bargeIn();
+      // Holding implies listening; un-mute the mic so the button can't lie
+      if (micMutedRef.current) {
+        micMutedRef.current = false;
+        setMicMuted(false);
+        vadRef.current?.start();
+      }
+    } else {
+      (async () => {
+        // Let the last segment finish transcribing so it goes out with the rest
+        const deadline = Date.now() + 15000;
+        while (pendingHoldRef.current > 0 && activeRef.current && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        const text = heldPartsRef.current.join(' ').trim();
+        heldPartsRef.current = [];
+        pendingHoldRef.current = 0;
+        setHeldText('');
+        if (!text || !activeRef.current) return;
+        const idle = await waitForIdle(4000);
+        if (idle && activeRef.current) callbacksRef.current.onTranscript?.(text);
+        else console.warn('[VoiceAgent] Chat still busy, dropping held utterance:', text);
+      })();
+    }
+    refreshState();
+  }, [bargeIn, refreshState, waitForIdle]);
 
   // Called with every streamed content delta from the assistant
   const feedAssistantDelta = useCallback(
@@ -407,6 +477,9 @@ export function useVoiceAgent({ onTranscript, onStopGeneration, loadingRef, onEr
     toggleMute,
     micMuted,
     toggleMicMute,
+    holding,
+    toggleHold,
+    heldText,
     sidecarState,
     sidecarLoaded: sidecarState === 'ready',
     sidecarLoading: sidecarState === 'starting' || sidecarState === 'loading',

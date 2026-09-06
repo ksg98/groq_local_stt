@@ -1,4 +1,4 @@
-import { ArrowUp, Loader2, ImagePlus, Hammer, Upload, Zap, ZapOff, Square, Mic, MicOff, X, AudioLines, Monitor, Camera, Volume2, VolumeX, Check } from "lucide-react";
+import { ArrowUp, Loader2, ImagePlus, Hammer, Upload, Zap, ZapOff, Square, Mic, MicOff, X, AudioLines, Monitor, Camera, Volume2, VolumeX, Check, Hand } from "lucide-react";
 import React, { useContext, useEffect, useRef, useState, useMemo, useCallback } from "react";
 import TextAreaAutosize from "react-textarea-autosize";
 import { SearchableSelect } from "./ui/SearchableSelect";
@@ -119,6 +119,7 @@ function ChatInput({
 		transcribing: { label: 'Transcribing…', cls: 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300', dot: 'bg-amber-500 animate-pulse' },
 		thinking: { label: 'Thinking…', cls: 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300', dot: 'bg-amber-500 animate-pulse' },
 		speaking: { label: 'Speaking', cls: 'bg-blue-500/10 border-blue-500/30 text-blue-700 dark:text-blue-300', dot: 'bg-blue-500 animate-pulse' },
+		holding: { label: 'Holding', cls: 'bg-violet-500/10 border-violet-500/30 text-violet-700 dark:text-violet-300', dot: 'bg-violet-500 animate-pulse' },
 		error: { label: 'Voice error', cls: 'bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400', dot: 'bg-red-500' },
 	};
 	const agentStateInfo = (() => {
@@ -128,8 +129,33 @@ function ChatInput({
 		if (state === 'starting' && voiceAgent.ttsStatus?.state === 'loading') {
 			return { ...base, label: 'Loading voice model…' };
 		}
+		if (state === 'holding') {
+			const words = voiceAgent.heldText ? voiceAgent.heldText.trim().split(/\s+/).length : 0;
+			return { ...base, label: words ? `Holding · ${words} words` : 'Holding — take your time' };
+		}
 		return base;
 	})();
+
+	const holdingFloor = !!voiceAgent?.holding;
+
+	// While the floor is held, the box previews the running transcript so you
+	// can watch it grow instead of talking into nothing. Any draft typed before
+	// holding is put back when the floor is released.
+	const heldDraftRef = useRef("");
+	useEffect(() => {
+		if (holdingFloor) {
+			heldDraftRef.current = message;
+			setMessage("");
+		} else {
+			setMessage(heldDraftRef.current);
+			heldDraftRef.current = "";
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [holdingFloor]);
+
+	useEffect(() => {
+		if (holdingFloor) setMessage(voiceAgent?.heldText || "");
+	}, [holdingFloor, voiceAgent?.heldText]);
 
 	// Function to handle file selection (images and other files)
 	const handleFileChange = (e) => {
@@ -388,6 +414,9 @@ function ChatInput({
 
 	const handleSubmit = (e) => {
 		e.preventDefault();
+		// Releasing the floor is what sends a held turn — submitting here too
+		// would send the same words twice.
+		if (holdingFloor) return;
 		const textContent = message.trim();
 		const hasText = textContent.length > 0;
 		const hasFiles = files.length > 0;
@@ -558,10 +587,17 @@ function ChatInput({
 							ref={textareaRef}
 							value={message}
 							onChange={(e) => setMessage(e.target.value)}
+							readOnly={holdingFloor}
 							onKeyDown={handleKeyDown}
 							onPaste={handlePaste}
 							onHeightChange={handleHeightChange}
-							placeholder={isDragOver ? "Drop files here..." : "Ask Groq anything..."}
+							placeholder={
+								isDragOver
+									? "Drop files here..."
+									: holdingFloor
+										? "Listening… release the floor to send"
+										: "Ask Groq anything..."
+							}
 							className={cn(
 								"w-full px-4 py-3 bg-transparent resize-none border-0 rounded-2xl text-foreground placeholder:text-muted-foreground focus:outline-none",
 								// Control overflow based on whether we're at max height
@@ -591,7 +627,7 @@ function ChatInput({
 							type={loading ? "button" : "submit"}
 							size="icon"
 							className="h-12 w-12 rounded-2xl transition-all duration-200 hover:scale-105"
-							disabled={!loading && (!message.trim() && files.length === 0)}
+							disabled={holdingFloor || (!loading && (!message.trim() && files.length === 0))}
 							onClick={loading ? (e) => {
 								e.preventDefault();
 								onStopGeneration?.();
@@ -708,6 +744,25 @@ function ChatInput({
 										<div className={cn("w-2 h-2 rounded-full", agentStateInfo.dot)} />
 									)}
 									<span className="text-sm font-medium">{agentStateInfo.label}{voiceAgent.muted ? ' · muted' : ''}{voiceAgent.micMuted ? ' · mic off' : ''}</span>
+									<Button
+										type="button"
+										variant="ghost"
+										size="sm"
+										onClick={voiceAgent.toggleHold}
+										className={cn(
+											"p-1 h-6 w-6 hover:bg-foreground/10 rounded-lg",
+											voiceAgent.holding && "bg-foreground/10"
+										)}
+										title={
+											voiceAgent.holding
+												? (voiceAgent.heldText
+													? "Release the floor and send what's in the box"
+													: "Release the floor — nothing captured yet")
+												: "Hold the floor — pause as long as you like without the agent replying"
+										}
+									>
+										<Hand className="w-4 h-4" />
+									</Button>
 									<Button
 										type="button"
 										variant="ghost"
