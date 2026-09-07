@@ -1,8 +1,104 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { Volume2, Pause, Play } from 'lucide-react';
 import Message from './Message';
+import SpeedControl from './SpeedControl';
 import MarkdownRenderer from './MarkdownRenderer';
 
-function MessageList({ messages = [], onToolCallExecute, onRemoveLastMessage, onReloadFromMessage, onRewindToMessage, loading, onActionsVisible }) {
+// Floating play button over a text selection inside the transcript. Reading a
+// selection is the quickest way past a chunk you would rather skim than hear.
+function SelectionSpeaker({ containerRef, speech }) {
+  const [pos, setPos] = React.useState(null);
+  const rangeRef = React.useRef(null);
+  const textRef = React.useRef('');
+
+  // Position from the live range rather than a remembered rectangle, so the
+  // button rides along with the text when the transcript scrolls.
+  const place = React.useCallback(() => {
+    const range = rangeRef.current;
+    if (!range) return;
+    const rect = range.getBoundingClientRect();
+    if (!rect || (!rect.width && !rect.height)) return;
+    const box = containerRef.current?.getBoundingClientRect();
+    // Only hide once the selection itself has scrolled out of view
+    if (box && (rect.bottom < box.top || rect.top > box.bottom)) {
+      setPos(null);
+      return;
+    }
+    setPos({ top: rect.top, left: rect.left + rect.width / 2 });
+  }, [containerRef]);
+
+  React.useEffect(() => {
+    if (!speech?.supported) return undefined;
+
+    // Capture never clears: a pointerup that lands outside the transcript, or
+    // on the button itself, must leave an existing selection alone. Clearing
+    // is selectionchange's job, and that is what stops the flicker.
+    const capture = () => {
+      const selection = window.getSelection();
+      const text = selection?.toString().trim();
+      if (!text || !selection.rangeCount) return;
+      const node = selection.anchorNode;
+      if (!node || !containerRef.current?.contains(node)) return;
+      rangeRef.current = selection.getRangeAt(0).cloneRange();
+      textRef.current = text;
+      place();
+    };
+
+    const onSelectionChange = () => {
+      if (window.getSelection()?.toString().trim()) return;
+      rangeRef.current = null;
+      textRef.current = '';
+      setPos(null);
+    };
+
+    document.addEventListener('pointerup', capture);
+    document.addEventListener('keyup', capture);
+    document.addEventListener('selectionchange', onSelectionChange);
+    document.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => {
+      document.removeEventListener('pointerup', capture);
+      document.removeEventListener('keyup', capture);
+      document.removeEventListener('selectionchange', onSelectionChange);
+      document.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+    };
+  }, [containerRef, speech?.supported, place]);
+
+  if (!pos) return null;
+  const reading = speech.tokenState('selection');
+  return (
+    <div
+      className="fixed z-50 -translate-x-1/2 -translate-y-full flex items-center gap-1 rounded-lg glass-card shadow-lg p-1"
+      style={{ top: pos.top - 8, left: pos.left }}
+      onMouseDown={(e) => e.preventDefault()} // keep the selection alive
+    >
+      <button
+        type="button"
+        onClick={() => {
+          if (reading === 'idle') speech.readAloud(textRef.current, 'selection');
+          else if (reading === 'paused') speech.resume();
+          else speech.pause();
+        }}
+        className="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium text-foreground hover:bg-accent transition-colors"
+      >
+        {reading === 'idle' ? (
+          <><Volume2 className="w-3.5 h-3.5" /> Speak selection</>
+        ) : reading === 'paused' ? (
+          <><Play className="w-3.5 h-3.5" /> Resume</>
+        ) : (
+          <><Pause className="w-3.5 h-3.5" /> Pause</>
+        )}
+      </button>
+      {reading !== 'idle' && (
+        <SpeedControl speed={speech.speed} steps={speech.speedSteps} onChange={speech.setSpeed} />
+      )}
+    </div>
+  );
+}
+
+function MessageList({ messages = [], onToolCallExecute, onRemoveLastMessage, onReloadFromMessage, onRewindToMessage, loading, onActionsVisible, speech = null }) {
+  const listRef = React.useRef(null);
   const [fullScreenImage, setFullScreenImage] = useState(null);
 
   // Effect to handle Escape key for closing fullscreen image
@@ -122,7 +218,8 @@ function MessageList({ messages = [], onToolCallExecute, onRemoveLastMessage, on
   }, [displayMessages]);
 
   return (
-    <div className="space-y-0.5 pt-4 p-4">
+    <div className="space-y-0.5 pt-4 p-4" ref={listRef}>
+      <SelectionSpeaker containerRef={listRef} speech={speech} />
       {displayMessages.map((message, index) => {
         // Find the original index in the messages array (including tool messages)
         const originalIndex = messages.findIndex((m, i) => {
@@ -156,6 +253,7 @@ function MessageList({ messages = [], onToolCallExecute, onRemoveLastMessage, on
             onToolCallExecute={onToolCallExecute}
             onReloadFromMessage={onReloadFromMessage}
             onRewindToMessage={onRewindToMessage}
+            speech={speech}
             allMessages={messages} // Pass all messages for the Message component to find tool results
             isLastMessage={index === displayMessages.length - 1}
             loading={loading}

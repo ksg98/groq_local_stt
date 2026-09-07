@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ToolCall from './ToolCall';
 import MarkdownRenderer from './MarkdownRenderer';
+import SpeedControl from './SpeedControl';
 import { TextShimmer } from './ui/text-shimmer';
 import { badgeVariants } from './ui/badge';
 import { cn } from '../lib/utils';
-import { Zap, Undo2 } from 'lucide-react';
+import { Zap, Undo2, Volume2, Pause, Play, Square } from 'lucide-react';
 
-function Message({ message, children, onToolCallExecute, allMessages, isLastMessage, messageIndex, onReloadFromMessage, onRewindToMessage, loading, onActionsVisible, hideReasoningUI = false, combinedReasoning = null, combinedReasoningDuration = null }) {
+function Message({ message, children, onToolCallExecute, allMessages, isLastMessage, messageIndex, onReloadFromMessage, onRewindToMessage, loading, onActionsVisible, hideReasoningUI = false, combinedReasoning = null, combinedReasoningDuration = null, speech = null }) {
   const { role, tool_calls, reasoning, isStreaming, executed_tools, liveReasoning, liveExecutedTools, reasoningSummaries, reasoningDuration, usage } = message;
   const [showReasoning, setShowReasoning] = useState(false);
   const [showExecutedTools, setShowExecutedTools] = useState(false);
@@ -100,6 +101,13 @@ function Message({ message, children, onToolCallExecute, allMessages, isLastMess
   // would be a no-op.
   const canRewind =
     typeof onRewindToMessage === 'function' && messageIndex !== undefined && !isLastMessage && !loading && !isStreamingMessage;
+
+  // Read-aloud state for this particular message
+  const speechState = speech?.tokenState?.(messageIndex) || 'idle';
+  const isReadingThis = speechState !== 'idle';
+  const isPausedHere = speechState === 'paused';
+  const speechText = typeof message.content === 'string' ? message.content : '';
+  const canSpeak = !!speech?.supported && !isUser && !!speechText.trim();
   const wrapperClasses = `message-content-wrapper ${isUser ? 'text-foreground' : 'text-foreground'} break-words text-sm overflow-hidden`; // Token text color for both, use break-words, smaller font, contain overflow
 
   const toggleReasoning = () => setShowReasoning(!showReasoning);
@@ -432,6 +440,50 @@ function Message({ message, children, onToolCallExecute, allMessages, isLastMess
                 {copySuccess ? 'Copied!' : 'Copy'}
               </div>
             </div>
+            {canSpeak && (
+              <>
+                <div className="relative group">
+                  <button
+                    onClick={() => {
+                      if (!isReadingThis) speech.readAloud(speechText, messageIndex);
+                      else if (isPausedHere) speech.resume();
+                      else speech.pause();
+                    }}
+                    className={cn(
+                      'flex items-center justify-center p-1.5 rounded hover:bg-accent transition-colors',
+                      isReadingThis && 'text-primary'
+                    )}
+                  >
+                    {!isReadingThis ? (
+                      <Volume2 className="w-3.5 h-3.5" />
+                    ) : isPausedHere ? (
+                      <Play className="w-3.5 h-3.5" />
+                    ) : (
+                      <Pause className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 glass-card text-foreground text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                    {!isReadingThis ? 'Read aloud' : isPausedHere ? 'Resume' : 'Pause'}
+                  </div>
+                </div>
+                {isReadingThis && (
+                  <>
+                    <div className="relative group">
+                      <button
+                        onClick={speech.stop}
+                        className="flex items-center justify-center p-1.5 rounded hover:bg-accent transition-colors"
+                      >
+                        <Square className="w-3.5 h-3.5" />
+                      </button>
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 glass-card text-foreground text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                        Stop
+                      </div>
+                    </div>
+                    <SpeedControl speed={speech.speed} steps={speech.speedSteps} onChange={speech.setSpeed} />
+                  </>
+                )}
+              </>
+            )}
             {onReloadFromMessage && messageIndex !== undefined && (
               <div className="relative group">
                 <button

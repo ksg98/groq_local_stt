@@ -2097,6 +2097,28 @@ function Settings() {
                     </div>
                   </>
                 )}
+                <div className="space-y-2">
+                  <Label>Speaking speed</Label>
+                  <Select
+                    value={String(settings.ttsSpeed ?? 1)}
+                    onValueChange={(value) => handleSelectChange('ttsSpeed', parseFloat(value))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Normal" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[0.75, 1, 1.25, 1.5, 1.75, 2].map((rate) => (
+                        <SelectItem key={rate} value={String(rate)}>
+                          {rate}x{rate === 1 ? ' (normal)' : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Applies to agent replies and to reading a message aloud. The speed button beside a
+                    playing message changes it too.
+                  </p>
+                </div>
               </CardContent>
             </Card>
 

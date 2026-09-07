@@ -1,4 +1,4 @@
-import { ArrowUp, Loader2, ImagePlus, Hammer, Upload, Zap, ZapOff, Square, Mic, MicOff, X, AudioLines, Monitor, Camera, Volume2, VolumeX, Check, Hand } from "lucide-react";
+import { ArrowUp, Loader2, ImagePlus, Hammer, Upload, Zap, ZapOff, Square, Mic, MicOff, X, AudioLines, Monitor, Camera, Volume2, VolumeX, Check, Hand, Pause, Play } from "lucide-react";
 import React, { useContext, useEffect, useRef, useState, useMemo, useCallback } from "react";
 import TextAreaAutosize from "react-textarea-autosize";
 import { SearchableSelect } from "./ui/SearchableSelect";
@@ -6,6 +6,8 @@ import { Button } from "./ui/button";
 import { cn } from "../lib/utils";
 import { ChatContext } from "../context/ChatContext";
 import { useSpeechToText } from "../hooks/useSpeechToText";
+import { SPEED_STEPS } from "../hooks/useVoiceAgent";
+import SpeedControl from "./SpeedControl";
 
 function ChatInput({
 	onSendMessage,
@@ -743,7 +745,7 @@ function ChatInput({
 									) : (
 										<div className={cn("w-2 h-2 rounded-full", agentStateInfo.dot)} />
 									)}
-									<span className="text-sm font-medium">{agentStateInfo.label}{voiceAgent.muted ? ' · muted' : ''}{voiceAgent.micMuted ? ' · mic off' : ''}</span>
+									<span className="text-sm font-medium">{agentStateInfo.label}{voiceAgent.speechPaused ? ' · paused' : ''}{voiceAgent.muted ? ' · muted' : ''}{voiceAgent.micMuted ? ' · mic off' : ''}</span>
 									<Button
 										type="button"
 										variant="ghost"
@@ -773,6 +775,27 @@ function ChatInput({
 									>
 										{voiceAgent.micMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
 									</Button>
+									<Button
+										type="button"
+										variant="ghost"
+										size="sm"
+										onClick={voiceAgent.speechPaused ? voiceAgent.resumeSpeech : voiceAgent.pauseSpeech}
+										className={cn(
+											"p-1 h-6 w-6 hover:bg-foreground/10 rounded-lg",
+											voiceAgent.speechPaused && "bg-foreground/10"
+										)}
+										title={voiceAgent.speechPaused ? "Resume speaking" : "Pause speaking — read at your own pace, then resume"}
+									>
+										{voiceAgent.speechPaused ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
+									</Button>
+									{!voiceAgent.muted && (
+										<SpeedControl
+											speed={voiceAgent.speed}
+											steps={SPEED_STEPS}
+											onChange={voiceAgent.setSpeed}
+											className="h-6 text-xs hover:bg-foreground/10"
+										/>
+									)}
 									<Button
 										type="button"
 										variant="ghost"

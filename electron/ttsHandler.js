@@ -192,7 +192,7 @@ function startOpenai(webContents, settings) {
   return { ok: true };
 }
 
-function openaiSpeak({ id, text }) {
+function openaiSpeak({ id, text, speed }) {
   const settings = loadSettingsFn ? loadSettingsFn() : {};
   const apiKey = settings.OPENAI_API_KEY;
   const model = settings.ttsOpenaiModel || 'gpt-4o-mini-tts';
@@ -209,7 +209,14 @@ function openaiSpeak({ id, text }) {
           Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ model, voice, input: text, response_format: 'pcm' }),
+        body: JSON.stringify({
+          model,
+          voice,
+          input: text,
+          response_format: 'pcm',
+          // API accepts 0.25x to 4x; anything outside that is a 400
+          speed: Math.min(4, Math.max(0.25, Number(speed) || 1.0)),
+        }),
         signal: controller.signal,
       });
       if (!response.ok) {
@@ -303,7 +310,7 @@ function initializeTtsHandlers(ipcMain, app, loadSettings) {
 
   ipcMain.handle('tts-speak', (_event, { id, text, voice, speed } = {}) => {
     if (!text || !String(text).trim()) return false;
-    if (engine === 'openai') return openaiSpeak({ id, text: String(text) });
+    if (engine === 'openai') return openaiSpeak({ id, text: String(text), speed });
     return writeCommand({
       cmd: 'speak',
       id,

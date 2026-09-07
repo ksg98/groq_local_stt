@@ -11,6 +11,20 @@ const VAD_BASE =
 
 const DEFAULT_VOICE = 'af_heart';
 const DEFAULT_SPEED = 1.0;
+export const SPEED_STEPS = [0.75, 1, 1.25, 1.5, 1.75, 2];
+// How many sentences may be in synthesis at once during read-aloud. Enough to
+// stay gapless, few enough that a speed change is heard within a sentence or two.
+const READ_LOOKAHEAD = 2;
+
+// Split arbitrary text into speakable sentences using the same rules the
+// streaming path uses, so code blocks and markdown are stripped identically.
+export function sentencesForSpeech(text) {
+  const chunker = new SentenceChunker();
+  const parts = chunker.feed(String(text || ''));
+  const rest = chunker.flush();
+  if (rest) parts.push(rest);
+  return parts.filter(Boolean);
+}
 
 /**
  * Continuous voice-agent loop: Silero VAD turn detection -> Whisper STT ->
@@ -47,6 +61,13 @@ export function useVoiceAgent({
   const [holding, setHolding] = useState(false);
   // Text captured while holding, joined and sent as one utterance on release
   const [heldText, setHeldText] = useState('');
+  // Reading a specific message or selection aloud, outside the agent's own
+  // replies. `token` identifies what is being read so the UI can mark it.
+  const [playback, setPlayback] = useState({ token: null, state: 'idle' });
+  // Playback is paused, whichever source it came from: an agent reply or a
+  // message being read aloud.
+  const [speechPaused, setSpeechPaused] = useState(false);
+  const [speed, setSpeedState] = useState(DEFAULT_SPEED);
 
   const activeRef = useRef(false);
   const mutedRef = useRef(muted);
@@ -59,6 +80,11 @@ export function useVoiceAgent({
   // Frames banked during the held turn, one offered per utterance
   const frameBankRef = useRef(null);
   const holdStartRef = useRef(0);
+  const speedRef = useRef(DEFAULT_SPEED);
+  const readingRef = useRef(null); // token of the text being read aloud
+  const pendingReadIdsRef = useRef(new Set()); // sent for synthesis, not yet done
+  const readQueueRef = useRef([]); // sentences not yet sent
+  const pumpReadQueueRef = useRef(null);
   const ttsStartedRef = useRef(false);
   const vadRef = useRef(null);
   const playerRef = useRef(null);
@@ -111,6 +137,33 @@ export function useVoiceAgent({
     };
   }, []);
 
+  // Speaking rate lives in Settings; re-read on focus so a change there
+  // applies without restarting the app.
+  useEffect(() => {
+    const load = () =>
+      window.electron
+        ?.getSettings?.()
+        .then((s) => {
+          const next = Math.min(4, Math.max(0.25, Number(s?.ttsSpeed) || DEFAULT_SPEED));
+          speedRef.current = next;
+          setSpeedState(next);
+        })
+        .catch(() => {});
+    load();
+    window.addEventListener('focus', load);
+    return () => window.removeEventListener('focus', load);
+  }, []);
+
+  const setSpeed = useCallback((value) => {
+    const next = Math.min(4, Math.max(0.25, Number(value) || DEFAULT_SPEED));
+    speedRef.current = next;
+    setSpeedState(next);
+    window.electron
+      ?.getSettings?.()
+      .then((s) => window.electron.saveSettings({ ...s, ttsSpeed: next }))
+      .catch(() => {});
+  }, []);
+
   // Preload the Kokoro model without starting a voice session
   const loadTts = useCallback(() => {
     (window.electron.tts.loadKokoro || window.electron.tts.start)().catch(() => {});
@@ -121,6 +174,30 @@ export function useVoiceAgent({
     if (activeRef.current) return;
     window.electron.tts.stop().catch(() => {});
   }, []);
+
+  // One player for everything that makes sound: agent replies and read-aloud.
+  const ensurePlayer = useCallback(() => {
+    if (!playerRef.current) {
+      playerRef.current = new TtsPlayer({
+        onSpeakingChange: (speaking) => {
+          speakingRef.current = speaking;
+          if (!speaking) finishReadIfDoneRef.current?.();
+          setAgentState(deriveStateRef.current?.() ?? 'idle');
+        },
+        onPausedChange: (paused) => {
+          setSpeechPaused(paused);
+          if (readingRef.current) {
+            setPlayback({ token: readingRef.current, state: paused ? 'paused' : 'speaking' });
+          }
+        },
+      });
+    }
+    return playerRef.current;
+  }, []);
+
+  // Assigned below; used by the player callback created above.
+  const deriveStateRef = useRef(null);
+  const finishReadIfDoneRef = useRef(null);
 
   const deriveState = useCallback(() => {
     if (!activeRef.current) return 'idle';
@@ -135,6 +212,8 @@ export function useVoiceAgent({
     return 'listening';
   }, [loadingRef]);
 
+  deriveStateRef.current = deriveState;
+
   const refreshState = useCallback(() => {
     setAgentState(deriveState());
   }, [deriveState]);
@@ -145,6 +224,59 @@ export function useVoiceAgent({
     const timer = setInterval(refreshState, 300);
     return () => clearInterval(timer);
   }, [active, refreshState]);
+
+  // Audio arrives for agent replies and for read-aloud alike, so this listener
+  // outlives any single session.
+  useEffect(() => {
+    const offChunk = window.electron?.tts?.onAudioChunk?.(({ id, sr, chunk }) => {
+      if (id < discardBelowRef.current) return;
+      if (!activeRef.current && !readingRef.current) return;
+      ensurePlayer().enqueue(chunk, sr);
+    });
+    const offDone = window.electron?.tts?.onSpeakDone?.(({ id }) => {
+      if (pendingReadIdsRef.current.delete(id)) {
+        pumpReadQueueRef.current?.();
+        finishReadIfDoneRef.current?.();
+      }
+    });
+    return () => {
+      offChunk?.();
+      offDone?.();
+    };
+  }, [ensurePlayer]);
+
+  // A read is over once every sentence has been synthesised and the queue has
+  // drained. Both conditions are needed: the player falls silent between
+  // sentences while the next one is still being generated.
+  const finishReadIfDone = useCallback(() => {
+    if (!readingRef.current) return;
+    if (readQueueRef.current.length > 0) return;
+    if (pendingReadIdsRef.current.size > 0) return;
+    if (playerRef.current?.isSpeaking) return;
+    readingRef.current = null;
+    setPlayback({ token: null, state: 'idle' });
+  }, []);
+  finishReadIfDoneRef.current = finishReadIfDone;
+
+  // Each sentence reads the speed at the moment it is sent, so changing it
+  // mid-read takes effect on the next one out of the queue rather than after
+  // a stop and restart.
+  const pumpReadQueue = useCallback(() => {
+    if (!readingRef.current) return;
+    while (readQueueRef.current.length && pendingReadIdsRef.current.size < READ_LOOKAHEAD) {
+      const sentence = readQueueRef.current.shift();
+      const id = ++speakSeqRef.current;
+      pendingReadIdsRef.current.add(id);
+      window.electron.tts
+        .speak({ id, text: sentence, voice: DEFAULT_VOICE, speed: speedRef.current })
+        .catch(() => {
+          pendingReadIdsRef.current.delete(id);
+          pumpReadQueueRef.current?.();
+          finishReadIfDoneRef.current?.();
+        });
+    }
+  }, []);
+  pumpReadQueueRef.current = pumpReadQueue;
 
   const bargeIn = useCallback(() => {
     const player = playerRef.current;
@@ -243,7 +375,12 @@ export function useVoiceAgent({
       }
     }
     playerRef.current?.stopAll();
+    setSpeechPaused(false);
     window.electron.tts?.cancel().catch(() => {});
+    readingRef.current = null;
+    pendingReadIdsRef.current.clear();
+    readQueueRef.current = [];
+    setPlayback({ token: null, state: 'idle' });
     unsubsRef.current.forEach((unsub) => {
       try {
         unsub();
@@ -291,15 +428,7 @@ export function useVoiceAgent({
         .catch(() => {});
 
       chunkerRef.current = new SentenceChunker();
-      if (!playerRef.current) {
-        playerRef.current = new TtsPlayer({
-          onSpeakingChange: (speaking) => {
-            speakingRef.current = speaking;
-            refreshState();
-          },
-        });
-      }
-      playerRef.current.ensureContext(); // inside the button-click gesture
+      ensurePlayer().ensureContext(); // inside the button-click gesture
 
       unsubsRef.current.push(
         window.electron.tts.onStatus((status) => {
@@ -310,10 +439,6 @@ export function useVoiceAgent({
             callbacksRef.current.onError?.(status.message || 'Text-to-speech failed to start');
           }
           refreshState();
-        }),
-        window.electron.tts.onAudioChunk(({ id, sr, chunk }) => {
-          if (!activeRef.current || id < discardBelowRef.current) return;
-          playerRef.current?.enqueue(chunk, sr);
         }),
         window.electron.tts.onError(({ message }) => {
           console.error('[VoiceAgent] TTS error:', message);
@@ -366,7 +491,7 @@ export function useVoiceAgent({
       callbacksRef.current.onError?.(error.message || 'Failed to start voice agent');
       await stop();
     }
-  }, [bargeIn, handleSpeechEnd, refreshState, stop]);
+  }, [bargeIn, ensurePlayer, handleSpeechEnd, refreshState, stop]);
 
   const toggle = useCallback(() => {
     if (activeRef.current) {
@@ -380,7 +505,7 @@ export function useVoiceAgent({
     if (!text || !activeRef.current || mutedRef.current) return;
     const id = ++speakSeqRef.current;
     window.electron.tts
-      .speak({ id, text, voice: DEFAULT_VOICE, speed: DEFAULT_SPEED })
+      .speak({ id, text, voice: DEFAULT_VOICE, speed: speedRef.current })
       .catch(() => {});
   }, []);
 
@@ -467,6 +592,48 @@ export function useVoiceAgent({
     refreshState();
   }, [bargeIn, refreshState, waitForIdle]);
 
+  // Stop any speech, whether an agent reply or a read-aloud.
+  const stopSpeech = useCallback(() => {
+    discardBelowRef.current = speakSeqRef.current + 1;
+    pendingReadIdsRef.current.clear();
+    readQueueRef.current = [];
+    readingRef.current = null;
+    chunkerRef.current?.reset();
+    playerRef.current?.stopAll();
+    window.electron.tts?.cancel().catch(() => {});
+    setPlayback({ token: null, state: 'idle' });
+  }, []);
+
+  // Read arbitrary text aloud: a finished reply, or a selection inside one.
+  // Works with no voice session running; the engine is started on demand.
+  const readAloud = useCallback(
+    async (text, token = 'selection') => {
+      const sentences = sentencesForSpeech(text);
+      if (!sentences.length) return;
+      stopSpeech();
+      readingRef.current = token;
+      setPlayback({ token, state: 'speaking' });
+      const player = ensurePlayer();
+      player.ensureContext(); // still inside the click gesture
+      try {
+        const started = await window.electron.tts.start();
+        if (started && started.ok === false) throw new Error(started.error || 'Text-to-speech failed to start');
+      } catch (error) {
+        readingRef.current = null;
+        setPlayback({ token: null, state: 'idle' });
+        callbacksRef.current.onError?.(error.message || 'Text-to-speech failed to start');
+        return;
+      }
+      if (readingRef.current !== token) return; // superseded while starting
+      readQueueRef.current = sentences;
+      pumpReadQueue();
+    },
+    [ensurePlayer, pumpReadQueue, stopSpeech]
+  );
+
+  const pauseSpeech = useCallback(() => ensurePlayer().pause(), [ensurePlayer]);
+  const resumeSpeech = useCallback(() => ensurePlayer().resume(), [ensurePlayer]);
+
   // Called with every streamed content delta from the assistant
   const feedAssistantDelta = useCallback(
     (delta) => {
@@ -512,6 +679,14 @@ export function useVoiceAgent({
     holding,
     toggleHold,
     heldText,
+    playback,
+    speechPaused,
+    readAloud,
+    pauseSpeech,
+    resumeSpeech,
+    stopSpeech,
+    speed,
+    setSpeed,
     sidecarState,
     sidecarLoaded: sidecarState === 'ready',
     sidecarLoading: sidecarState === 'starting' || sidecarState === 'loading',

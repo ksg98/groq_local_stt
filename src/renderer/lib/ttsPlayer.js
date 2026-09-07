@@ -2,19 +2,24 @@
 // Chunks are scheduled back-to-back on a single AudioContext.
 
 export class TtsPlayer {
-  constructor({ sampleRate = 24000, onSpeakingChange } = {}) {
+  constructor({ sampleRate = 24000, onSpeakingChange, onPausedChange } = {}) {
     this.sampleRate = sampleRate;
     this.onSpeakingChange = onSpeakingChange;
+    this.onPausedChange = onPausedChange;
     this.ctx = null;
     this.cursor = 0;
     this.sources = new Set();
+    this.paused = false;
   }
 
   ensureContext() {
     if (!this.ctx) {
       this.ctx = new AudioContext({ sampleRate: this.sampleRate });
     }
-    if (this.ctx.state === 'suspended') {
+    // While paused the context is suspended on purpose — a chunk arriving mid
+    // pause must not restart playback. It still schedules correctly, because
+    // currentTime is frozen for as long as the context stays suspended.
+    if (this.ctx.state === 'suspended' && !this.paused) {
       this.ctx.resume().catch(() => {});
     }
     return this.ctx;
@@ -22,6 +27,26 @@ export class TtsPlayer {
 
   get isSpeaking() {
     return this.sources.size > 0;
+  }
+
+  get isPaused() {
+    return this.paused;
+  }
+
+  pause() {
+    if (!this.ctx || this.paused || this.sources.size === 0) return false;
+    this.paused = true;
+    this.ctx.suspend().catch(() => {});
+    this.onPausedChange?.(true);
+    return true;
+  }
+
+  resume() {
+    if (!this.ctx || !this.paused) return false;
+    this.paused = false;
+    this.ctx.resume().catch(() => {});
+    this.onPausedChange?.(false);
+    return true;
   }
 
   // chunk: Uint8Array of int16 LE PCM; sr: its sample rate
@@ -74,6 +99,13 @@ export class TtsPlayer {
     }
     this.sources.clear();
     this.cursor = 0;
+    // Leave the context running, or the next thing to speak would be stuck
+    // behind a suspension nobody is going to lift.
+    if (this.paused) {
+      this.paused = false;
+      this.ctx?.resume().catch(() => {});
+      this.onPausedChange?.(false);
+    }
     if (wasSpeaking) this.onSpeakingChange?.(false);
   }
 

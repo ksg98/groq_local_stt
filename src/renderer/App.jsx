@@ -7,7 +7,7 @@ import ToolApprovalModal from './components/ToolApprovalModal';
 import ChatHistorySidebar from './components/ChatHistorySidebar';
 import ScreenSourcePicker from './components/ScreenSourcePicker';
 import { useChat } from './context/ChatContext'; // Import useChat hook
-import { useVoiceAgent } from './hooks/useVoiceAgent';
+import { useVoiceAgent, SPEED_STEPS } from './hooks/useVoiceAgent';
 import { buildFrameParts, mergeFinalFrame, pruneHistoryImages } from './lib/frameBank';
 import { useMediaCapture } from './hooks/useMediaCapture';
 // Import shared model definitions - REMOVED
@@ -1402,6 +1402,24 @@ function App() {
   });
   voiceAgentRef.current = voiceAgent;
 
+  // Read-aloud controls handed to the transcript: play a whole reply, or just
+  // a selection inside one, with pause and speed while it runs.
+  const speech = useMemo(
+    () => ({
+      supported: voiceAgent.supported,
+      speed: voiceAgent.speed,
+      readAloud: voiceAgent.readAloud,
+      pause: voiceAgent.pauseSpeech,
+      resume: voiceAgent.resumeSpeech,
+      stop: voiceAgent.stopSpeech,
+      speedSteps: SPEED_STEPS,
+      setSpeed: voiceAgent.setSpeed,
+      tokenState: (token) =>
+        voiceAgent.playback.token === token ? voiceAgent.playback.state : 'idle',
+    }),
+    [voiceAgent.supported, voiceAgent.speed, voiceAgent.readAloud, voiceAgent.pauseSpeech, voiceAgent.resumeSpeech, voiceAgent.stopSpeech, voiceAgent.setSpeed, voiceAgent.playback]
+  );
+
   // Screenshare/camera are only offered during voice sessions — stop any
   // active capture when the agent turns off
   useEffect(() => {
@@ -1967,6 +1985,7 @@ function App() {
                     onRemoveLastMessage={handleRemoveLastMessage}
                     onReloadFromMessage={handleReloadFromMessage}
                     onRewindToMessage={handleRewindToMessage}
+                    speech={speech}
                     loading={loading}
                     onActionsVisible={scrollToBottom}
                   />
