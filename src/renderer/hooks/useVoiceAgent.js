@@ -85,6 +85,9 @@ export function useVoiceAgent({
   const pendingReadIdsRef = useRef(new Set()); // sent for synthesis, not yet done
   const readQueueRef = useRef([]); // sentences not yet sent
   const pumpReadQueueRef = useRef(null);
+  const stopSpeechRef = useRef(null);
+  const sentenceByIdRef = useRef(new Map()); // id -> { text, retried }
+  const audioSeenRef = useRef(new Set()); // ids that actually produced sound
   const ttsStartedRef = useRef(false);
   const vadRef = useRef(null);
   const playerRef = useRef(null);
@@ -231,13 +234,22 @@ export function useVoiceAgent({
     const offChunk = window.electron?.tts?.onAudioChunk?.(({ id, sr, chunk }) => {
       if (id < discardBelowRef.current) return;
       if (!activeRef.current && !readingRef.current) return;
+      audioSeenRef.current.add(id);
       ensurePlayer().enqueue(chunk, sr);
     });
     const offDone = window.electron?.tts?.onSpeakDone?.(({ id }) => {
-      if (pendingReadIdsRef.current.delete(id)) {
-        pumpReadQueueRef.current?.();
-        finishReadIfDoneRef.current?.();
+      if (!pendingReadIdsRef.current.delete(id)) return;
+      const entry = sentenceByIdRef.current.get(id);
+      sentenceByIdRef.current.delete(id);
+      const madeSound = audioSeenRef.current.delete(id);
+      // A synthesis that was cancelled part-way still reports done, just with
+      // no audio behind it. Without this the sentence would be silently
+      // skipped while the rest of the message carried on.
+      if (!madeSound && entry && !entry.retried && readingRef.current) {
+        readQueueRef.current.unshift({ text: entry.text, retried: true });
       }
+      pumpReadQueueRef.current?.();
+      finishReadIfDoneRef.current?.();
     });
     return () => {
       offChunk?.();
@@ -264,21 +276,38 @@ export function useVoiceAgent({
   const pumpReadQueue = useCallback(() => {
     if (!readingRef.current) return;
     while (readQueueRef.current.length && pendingReadIdsRef.current.size < READ_LOOKAHEAD) {
-      const sentence = readQueueRef.current.shift();
+      const item = readQueueRef.current.shift();
       const id = ++speakSeqRef.current;
       pendingReadIdsRef.current.add(id);
+      sentenceByIdRef.current.set(id, item);
+      const abandon = () => {
+        // No 'done' is coming for this one, so release its slot by hand
+        // rather than leaving the queue wedged behind it.
+        if (!pendingReadIdsRef.current.delete(id)) return;
+        sentenceByIdRef.current.delete(id);
+        audioSeenRef.current.delete(id);
+        pumpReadQueueRef.current?.();
+        finishReadIfDoneRef.current?.();
+      };
       window.electron.tts
-        .speak({ id, text: sentence, voice: DEFAULT_VOICE, speed: speedRef.current })
-        .catch(() => {
-          pendingReadIdsRef.current.delete(id);
-          pumpReadQueueRef.current?.();
-          finishReadIfDoneRef.current?.();
-        });
+        .speak({ id, text: item.text, voice: DEFAULT_VOICE, speed: speedRef.current })
+        .then((accepted) => {
+          if (accepted === false) abandon();
+        })
+        .catch(abandon);
     }
   }, []);
   pumpReadQueueRef.current = pumpReadQueue;
 
   const bargeIn = useCallback(() => {
+    // Reading a message aloud was asked for deliberately. If the mic opens
+    // mid-read, end the read cleanly — cancelling underneath it would drop
+    // whichever sentence was being synthesised and carry on as if it had been
+    // spoken, which is how sentences went missing.
+    if (readingRef.current) {
+      stopSpeechRef.current?.();
+      return;
+    }
     const player = playerRef.current;
     const busy = player?.isSpeaking || loadingRef.current;
     if (!busy) return;
@@ -379,6 +408,8 @@ export function useVoiceAgent({
     window.electron.tts?.cancel().catch(() => {});
     readingRef.current = null;
     pendingReadIdsRef.current.clear();
+    sentenceByIdRef.current.clear();
+    audioSeenRef.current.clear();
     readQueueRef.current = [];
     setPlayback({ token: null, state: 'idle' });
     unsubsRef.current.forEach((unsub) => {
@@ -517,6 +548,7 @@ export function useVoiceAgent({
     setMuted(next);
     localStorage.setItem('voice_agent_muted', String(next));
     if (next) {
+      if (readingRef.current) stopSpeechRef.current?.();
       discardBelowRef.current = speakSeqRef.current + 1;
       chunkerRef.current?.reset();
       playerRef.current?.stopAll();
@@ -596,13 +628,16 @@ export function useVoiceAgent({
   const stopSpeech = useCallback(() => {
     discardBelowRef.current = speakSeqRef.current + 1;
     pendingReadIdsRef.current.clear();
+    sentenceByIdRef.current.clear();
+    audioSeenRef.current.clear();
     readQueueRef.current = [];
     readingRef.current = null;
     chunkerRef.current?.reset();
     playerRef.current?.stopAll();
-    window.electron.tts?.cancel().catch(() => {});
     setPlayback({ token: null, state: 'idle' });
+    return window.electron.tts?.cancel().catch(() => {}) ?? Promise.resolve();
   }, []);
+  stopSpeechRef.current = stopSpeech;
 
   // Read arbitrary text aloud: a finished reply, or a selection inside one.
   // Works with no voice session running; the engine is started on demand.
@@ -610,7 +645,9 @@ export function useVoiceAgent({
     async (text, token = 'selection') => {
       const sentences = sentencesForSpeech(text);
       if (!sentences.length) return;
-      stopSpeech();
+      // Await the cancel: the engine drops queued work when it lands, so new
+      // sentences must not be in flight while it is still on its way.
+      await stopSpeech();
       readingRef.current = token;
       setPlayback({ token, state: 'speaking' });
       const player = ensurePlayer();
@@ -625,7 +662,7 @@ export function useVoiceAgent({
         return;
       }
       if (readingRef.current !== token) return; // superseded while starting
-      readQueueRef.current = sentences;
+      readQueueRef.current = sentences.map((text) => ({ text, retried: false }));
       pumpReadQueue();
     },
     [ensurePlayer, pumpReadQueue, stopSpeech]
@@ -652,6 +689,10 @@ export function useVoiceAgent({
 
   // Called on stream error/cancel — drop any un-spoken text
   const cancelSpeech = useCallback(() => {
+    if (readingRef.current) {
+      stopSpeechRef.current?.();
+      return;
+    }
     discardBelowRef.current = speakSeqRef.current + 1;
     chunkerRef.current?.reset();
     playerRef.current?.stopAll();
