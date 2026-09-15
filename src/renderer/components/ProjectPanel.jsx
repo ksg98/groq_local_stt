@@ -314,7 +314,7 @@ export function ProjectModal({ mode = 'create', project = null, onClose }) {
 
   return (
     <div
-      className="fixed inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      className="fixed inset-0 bg-background/85 backdrop-blur-sm flex items-center justify-center z-50 p-4"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <form onSubmit={handleSubmit} className="glass-card rounded-xl w-full max-w-md">
@@ -376,7 +376,7 @@ export function ProjectKnowledgeModal({ project, onClose, onEdit }) {
 
   return (
     <div
-      className="fixed inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      className="fixed inset-0 bg-background/85 backdrop-blur-sm flex items-center justify-center z-50 p-4"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="glass-card rounded-xl w-full max-w-2xl max-h-[85vh] flex flex-col">

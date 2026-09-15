@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Volume2, Pause, Play } from 'lucide-react';
+import { Volume2, Pause, Play, Layers, ChevronDown } from 'lucide-react';
+import { cn } from '../lib/utils';
+import { formatTokens } from '../lib/contextWindow';
 import Message from './Message';
 import SpeedControl from './SpeedControl';
 import MarkdownRenderer from './MarkdownRenderer';
@@ -92,6 +94,43 @@ function SelectionSpeaker({ containerRef, speech }) {
       </button>
       {reading !== 'idle' && (
         <SpeedControl speed={speech.speed} steps={speech.speedSteps} onChange={speech.setSpeed} />
+      )}
+    </div>
+  );
+}
+
+// Where a chat was compacted. Older messages stay visible above; the model
+// sees the summary instead of them.
+function CompactionNotice({ message }) {
+  const [open, setOpen] = useState(false);
+  const info = message.compaction || {};
+  return (
+    <div className="my-4" data-no-speech="">
+      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+        <div className="h-px flex-1 bg-border" />
+        <button
+          type="button"
+          onClick={() => setOpen((prev) => !prev)}
+          className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1 hover:bg-accent hover:text-foreground transition-colors"
+          aria-expanded={open}
+        >
+          <Layers className="w-3.5 h-3.5" />
+          <span>
+            {info.auto ? 'Context compacted automatically' : 'Conversation compacted'}
+            {info.tokensBefore ? ` · ${formatTokens(info.tokensBefore)} tokens summarized` : ''}
+          </span>
+          <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', open && 'rotate-180')} />
+        </button>
+        <div className="h-px flex-1 bg-border" />
+      </div>
+      {open && (
+        <div className="mt-3 rounded-lg glass-card p-4">
+          <p className="text-xs text-muted-foreground mb-2">
+            The model now sees this summary instead of the messages above
+            {info.instructions ? `, focused on: ${info.instructions}` : ''}.
+          </p>
+          <MarkdownRenderer content={message.content || ''} />
+        </div>
       )}
     </div>
   );
@@ -217,10 +256,14 @@ function MessageList({ messages = [], onToolCallExecute, onRemoveLastMessage, on
     return groupInfo;
   }, [displayMessages]);
 
+  // A compaction marker is not a message: the reply before it keeps its actions
+  const lastMessageIndex = displayMessages.map((m) => !m.compaction).lastIndexOf(true);
+
   return (
     <div className="space-y-0.5 pt-4 p-4" ref={listRef}>
       <SelectionSpeaker containerRef={listRef} speech={speech} />
       {displayMessages.map((message, index) => {
+        if (message.compaction) return <CompactionNotice key={index} message={message} />;
         // Find the original index in the messages array (including tool messages)
         const originalIndex = messages.findIndex((m, i) => {
           // Find the nth non-tool message in messages that matches this display message
@@ -255,7 +298,7 @@ function MessageList({ messages = [], onToolCallExecute, onRemoveLastMessage, on
             onRewindToMessage={onRewindToMessage}
             speech={speech}
             allMessages={messages} // Pass all messages for the Message component to find tool results
-            isLastMessage={index === displayMessages.length - 1}
+            isLastMessage={index === lastMessageIndex}
             loading={loading}
             onActionsVisible={onActionsVisible}
             hideReasoningUI={hideReasoningUI}

@@ -230,7 +230,7 @@ function ToolsPanel({ tools = [], onClose, onDisconnectServer, onReconnectServer
     .map(server => server.id);
 
   return (
-    <div className="fixed inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-background/85 backdrop-blur-sm flex items-center justify-center z-50">
       {/* Plain div instead of Card so the glass surface isn't painted over by Card's opaque bg-card/shadow utilities */}
       <div className="glass rounded-lg text-foreground w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 pt-4">

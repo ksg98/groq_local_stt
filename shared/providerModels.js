@@ -163,6 +163,7 @@ async function fetchChatgptModels({ token, accountId }) {
     models[`${CHATGPT_MODEL_PREFIX}${model.slug}`] = {
       displayName: `${model.display_name || model.slug} (ChatGPT)`,
       context: model.context_window || 272000,
+      contextReported: !!model.context_window,
       vision_supported: true,
       builtin_tools_supported: false,
       provider: 'openai',
@@ -318,6 +319,7 @@ async function fetchLocalLlmModels(baseUrl, apiKey) {
     models[`${LOCAL_MODEL_PREFIX}${id}`] = {
       displayName: `${id} (Local)`,
       context: 32768, // /v1/models doesn't report context; override via Custom Models if needed
+      contextReported: false,
       vision_supported: vision,
       builtin_tools_supported: false,
       provider: 'local',
@@ -415,6 +417,7 @@ function mapAnthropicModel(m) {
   return {
     displayName: m.display_name || m.id,
     context: m.max_input_tokens || 200000,
+    contextReported: !!m.max_input_tokens,
     max_tokens_default: Math.min(m.max_tokens || 8192, 64000),
     vision_supported: caps.image_input ? !!caps.image_input.supported : true,
     builtin_tools_supported: false,

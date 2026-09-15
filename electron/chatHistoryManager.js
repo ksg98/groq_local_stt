@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const titleGenerator = require('./titleGenerator');
+const conversationCompactor = require('./conversationCompactor');
 const { createGroqClient } = require('./chatHandler');
 
 let appInstance = null;
@@ -277,6 +278,45 @@ async function generateChatTitle(userMessage, chatId) {
 }
 
 /**
+ * Summarize a conversation with its own model so the summary can replace the
+ * messages in later requests.
+ * @param {Array} messages - what the model currently sees
+ * @param {string} model - the chat's model
+ * @param {{instructions?: string, contextWindow?: number}} [options]
+ * @returns {Promise<{summary?: string, error?: string}>}
+ */
+async function compactChat(messages, model, options = {}) {
+    if (!settingsLoader) return { error: 'Settings loader not initialized' };
+    const settings = settingsLoader();
+    const chosenModel = model || settings.model;
+    let modelContextSizes = {};
+    if (modelCatalogLoader) {
+        try {
+            modelContextSizes = await modelCatalogLoader(settings);
+        } catch (error) {
+            console.error('[ChatHistory] Could not load model catalog for compaction:', error.message);
+        }
+    }
+    const startedAt = Date.now();
+    try {
+        const summary = await conversationCompactor.compactConversation({
+            messages: Array.isArray(messages) ? messages : [],
+            model: chosenModel,
+            settings,
+            modelContextSizes,
+            createGroqClient,
+            instructions: options?.instructions,
+            contextWindow: options?.contextWindow
+        });
+        console.log(`[ChatHistory] Compacted ${messages.length} messages via ${chosenModel}: ${summary.length} chars (${Date.now() - startedAt}ms)`);
+        return { summary };
+    } catch (error) {
+        console.error(`[ChatHistory] Compaction via ${chosenModel} failed:`, error.message || error);
+        return { error: error.message || String(error) };
+    }
+}
+
+/**
  * Initialize IPC handlers for chat history
  * @param {Electron.IpcMain} ipcMain - The IPC main instance
  */
@@ -318,6 +358,11 @@ function initializeChatHistoryHandlers(ipcMain) {
         return { success };
     });
     
+    // Summarize a conversation to free up its context window
+    ipcMain.handle('chat-history-compact', async (event, messages, model, options) => {
+        return compactChat(messages, model, options);
+    });
+
     // Generate a title for a chat, using that chat's model
     ipcMain.handle('chat-history-generate-title', async (event, userMessage, chatId) => {
         return generateChatTitle(userMessage, chatId);
@@ -335,6 +380,7 @@ module.exports = {
     listChats,
     updateChatMessages,
     updateChatTitle,
-    generateChatTitle
+    generateChatTitle,
+    compactChat
 };
 

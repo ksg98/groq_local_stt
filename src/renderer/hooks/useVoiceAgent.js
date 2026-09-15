@@ -319,11 +319,21 @@ export function useVoiceAgent({
       pumpReadQueueRef.current?.();
       finishReadIfDoneRef.current?.();
     });
+    // The engine went away mid-read (crashed, unloaded, failed to load): no
+    // 'done' is coming, so end the read instead of leaving its bar up
+    const offStatus = window.electron?.tts?.onStatus?.((status) => {
+      if (!readingRef.current) return;
+      if (['stopped', 'error', 'unsupported'].includes(status?.state)) {
+        console.warn('[VoiceAgent] Speech engine', status.state, 'during read-aloud:', status.message || '');
+        stopSpeechRef.current?.();
+      }
+    });
     return () => {
       offChunk?.();
       offWords?.();
       offDone?.();
       offError?.();
+      offStatus?.();
     };
   }, [ensurePlayer]);
 

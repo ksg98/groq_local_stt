@@ -4,7 +4,7 @@ import React from 'react';
 function ScreenSourcePicker({ sources = [], onSelect, onClose }) {
 	return (
 		<div
-			className="fixed inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-50 p-6"
+			className="fixed inset-0 bg-background/85 backdrop-blur-sm flex items-center justify-center z-50 p-6"
 			onClick={onClose}
 		>
 			<div

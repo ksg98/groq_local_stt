@@ -10,6 +10,7 @@ import { ProjectKnowledgePanel, ProjectModal, ProjectKnowledgeModal } from './co
 import { useChat } from './context/ChatContext'; // Import useChat hook
 import { useVoiceAgent, SPEED_STEPS, resolveToken } from './hooks/useVoiceAgent';
 import { useReadingPrefs } from './hooks/useReadingPrefs';
+import { applyCompaction, estimateContextTokens, resolveContextWindow, parseCompactCommand, formatTokens, MIN_COMPACT_TOKENS } from './lib/contextWindow';
 import { buildFrameParts, mergeFinalFrame, pruneHistoryImages } from './lib/frameBank';
 import { useMediaCapture } from './hooks/useMediaCapture';
 // Import shared model definitions - REMOVED
@@ -128,6 +129,10 @@ function App() {
   // Screen-share frame policy from Settings: frames per held turn, and how
   // many recent turns keep their images in the API payload.
   const frameSettingsRef = useRef({ perTurn: 5, historyTurns: 2 });
+  // Context window and auto-compact preferences from Settings
+  const [contextPrefs, setContextPrefs] = useState({ contextWindow: 'auto', autoCompact: true, threshold: 0.85 });
+  // Compaction in progress / its outcome, shown above the input
+  const [compactState, setCompactState] = useState(null);
   const frameBudgetRef = useRef(5);
   useEffect(() => {
     const load = () =>
@@ -138,6 +143,13 @@ function App() {
           const historyTurns = Math.max(0, Number(s?.screenFrameHistoryTurns ?? 2) || 0);
           frameSettingsRef.current = { perTurn, historyTurns };
           frameBudgetRef.current = perTurn;
+          const threshold = Math.min(0.98, Math.max(0.5, Number(s?.autoCompactThreshold) || 0.85));
+          const nextContext = { contextWindow: s?.contextWindow ?? 'auto', autoCompact: s?.autoCompact !== false, threshold };
+          setContextPrefs((prev) =>
+            prev.contextWindow === nextContext.contextWindow && prev.autoCompact === nextContext.autoCompact && prev.threshold === nextContext.threshold
+              ? prev
+              : nextContext
+          );
         })
         .catch(() => {});
     load();
@@ -159,7 +171,14 @@ function App() {
 
   // Rewind: drop everything after a message, without resending anything.
   // The truncated history is saved through the same path as any edit.
+  // A read-aloud is tied to a message position, so it ends whenever the
+  // messages it points at go away
+  const stopReadAloud = () => {
+    if (voiceAgentRef.current?.playback?.token != null) voiceAgentRef.current.stopSpeech();
+  };
+
   const handleRewindToMessage = (messageIndex) => {
+    stopReadAloud();
     if (loadingRef.current) handleStopGeneration();
     setMessages((prev) => (messageIndex < prev.length - 1 ? prev.slice(0, messageIndex + 1) : prev));
   };
@@ -174,6 +193,7 @@ function App() {
 
   // Handle reloading from a specific message (remove all messages after it and resend)
   const handleReloadFromMessage = async (messageIndex) => {
+    stopReadAloud();
     // Find the last user message at or before the messageIndex
     let lastUserMessageIndex = -1;
     for (let i = messageIndex; i >= 0; i--) {
@@ -814,7 +834,8 @@ function App() {
 
         // Start streaming chat
         // Old screenshots leave the payload here; the chat on screen keeps them
-        const apiMessages = pruneHistoryImages(turnMessages, frameSettingsRef.current.historyTurns);
+        // A compacted chat sends its summary in place of the older messages
+        const apiMessages = pruneHistoryImages(applyCompaction(turnMessages), frameSettingsRef.current.historyTurns);
         // A chat inside a project sends its id so the main process can fold
         // the project's instructions and files into the system prompt
         const streamHandler = window.electron.startChatStream(apiMessages, selectedModel, {
@@ -1234,12 +1255,88 @@ function App() {
   };
 
   // Handle sending message (text or structured content with images)
+  // Summarize the conversation with its own model; the summary replaces the
+  // older messages in every later request. Returns the new message list.
+  const compactConversation = async ({ instructions = '', auto = false, baseMessages } = {}) => {
+    const source = baseMessages || messages;
+    const view = applyCompaction(source);
+    if (!currentChatId || !view.some((m) => m.role === 'assistant')) {
+      setCompactState({ state: 'info', message: 'Nothing to compact yet.' });
+      return null;
+    }
+    const limit = resolveContextWindow(selectedModel, modelConfigs, contextPrefs.contextWindow);
+    const tokensBefore = estimateContextTokens(source).tokens;
+    if (tokensBefore < MIN_COMPACT_TOKENS) {
+      // Auto-compact skips quietly; a manual request says why nothing happened
+      if (!auto) {
+        setCompactState({
+          state: 'info',
+          message: `Only ${formatTokens(tokensBefore)} tokens in context. Chats under ${formatTokens(MIN_COMPACT_TOKENS)} are not compacted.`,
+        });
+      }
+      return null;
+    }
+    setCompactState({
+      state: 'running',
+      message: auto ? 'Context is nearly full. Compacting the conversation…' : 'Compacting the conversation…',
+    });
+    // Only what the summarizer reads crosses IPC: no images, no UI state
+    const transport = view.map((m) => ({
+      role: m.role,
+      name: m.name,
+      tool_calls: m.tool_calls,
+      content: Array.isArray(m.content)
+        ? m.content.map((part) => (part?.type === 'image_url' ? { type: 'text', text: '[image]' } : part))
+        : m.content,
+    }));
+    try {
+      const result = await window.electron.chatHistory.compact(transport, selectedModel, { instructions, contextWindow: limit });
+      if (!result?.summary) throw new Error(result?.error || 'The model returned no summary');
+      const marker = {
+        role: 'system',
+        content: result.summary,
+        compaction: {
+          auto,
+          at: new Date().toISOString(),
+          tokensBefore,
+          model: selectedModel,
+          ...(instructions ? { instructions } : {}),
+        },
+      };
+      const next = [...source, marker];
+      setMessages(next);
+      setCompactState(null);
+      return next;
+    } catch (error) {
+      console.error('[Compact] Failed:', error);
+      setCompactState({ state: 'error', message: `Compaction failed: ${error.message || error}` });
+      return null;
+    }
+  };
+
+  const handleCompactNow = async (instructions = '') => {
+    if (loadingRef.current) return;
+    setLoading(true);
+    try {
+      await compactConversation({ instructions });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSendMessage = async (content, extra = {}) => {
     // Check if content is structured (array) or just text (string)
     const isStructuredContent = Array.isArray(content);
     const hasContent = isStructuredContent ? content.some(part => (part.type === 'text' && part.text.trim()) || part.type === 'image_url') : content.trim();
 
     if (!hasContent) return;
+
+    // "/compact [instructions]" summarizes instead of sending
+    const compactCommand = parseCompactCommand(content);
+    if (compactCommand) {
+      await handleCompactNow(compactCommand.instructions);
+      return;
+    }
 
     // While screen/camera capture is active, attach what's on screen now. A
     // released held turn also brings the frames banked at each utterance, so
@@ -1252,6 +1349,19 @@ function App() {
         const parts = isStructuredContent ? [...content] : [{ type: 'text', text: content }];
         parts.push(...buildFrameParts(frames));
         content = parts;
+      }
+    }
+
+    // Auto-compact: summarize first when this message would push the context
+    // past the threshold
+    let baseMessages = messages;
+    if (contextPrefs.autoCompact && currentChatId && messages.length > 0) {
+      const limit = resolveContextWindow(selectedModel, modelConfigs, contextPrefs.contextWindow);
+      const projected = estimateContextTokens([...messages, { role: 'user', content }]).tokens;
+      if (projected >= limit * contextPrefs.threshold && projected >= MIN_COMPACT_TOKENS) {
+        setLoading(true);
+        const compacted = await compactConversation({ auto: true, baseMessages: messages });
+        if (compacted) baseMessages = compacted;
       }
     }
 
@@ -1273,7 +1383,7 @@ function App() {
       content: content // Assumes ChatInput now sends the correct structured format
     };
     // Add user message optimistically BEFORE the API call
-    const initialMessages = [...messages, userMessage];
+    const initialMessages = [...baseMessages, userMessage];
     setMessages(initialMessages);
 
     setLoading(true);
@@ -1448,6 +1558,33 @@ function App() {
     }),
     [voiceAgent.supported, voiceAgent.speed, voiceAgent.readAloud, voiceAgent.pauseSpeech, voiceAgent.resumeSpeech, voiceAgent.stopSpeech, voiceAgent.setSpeed, voiceAgent.playback, voiceAgent.readCursorStore, voiceAgent.jumpTo, voiceAgent.skipSentence, readingPrefs]
   );
+
+  // Context meter for the input bar
+  const contextUsage = useMemo(() => {
+    const limit = resolveContextWindow(selectedModel, modelConfigs, contextPrefs.contextWindow);
+    const { tokens, measured } = estimateContextTokens(messages);
+    return { tokens, limit, measured, autoCompact: contextPrefs.autoCompact, threshold: contextPrefs.threshold };
+  }, [messages, selectedModel, modelConfigs, contextPrefs]);
+
+  // Leaving a chat ends a read-aloud (its token is a message position, which
+  // would land on an unrelated message in the next chat) and clears any
+  // compaction notice
+  const prevChatIdRef = useRef(currentChatId);
+  useEffect(() => {
+    const prev = prevChatIdRef.current;
+    prevChatIdRef.current = currentChatId;
+    if (prev && prev !== currentChatId) {
+      if (voiceAgentRef.current?.playback?.token != null) voiceAgentRef.current.stopSpeech();
+      setCompactState(null);
+    }
+  }, [currentChatId]);
+
+  // Notices fade on their own; a running compaction stays until it ends
+  useEffect(() => {
+    if (!compactState || compactState.state === 'running') return undefined;
+    const timer = setTimeout(() => setCompactState(null), 6000);
+    return () => clearTimeout(timer);
+  }, [compactState]);
 
   // Screenshare/camera are only offered during voice sessions — stop any
   // active capture when the agent turns off
@@ -2027,6 +2164,9 @@ function App() {
                     onReasoningEffortChange={setReasoningEffort}
                     voiceAgent={voiceAgent}
                     capture={capture}
+                    contextUsage={contextUsage}
+                    onCompact={() => handleCompactNow()}
+                    compactState={compactState}
                   />
                 </div>
 
@@ -2061,6 +2201,9 @@ function App() {
                     onReasoningEffortChange={setReasoningEffort}
                     voiceAgent={voiceAgent}
                     capture={capture}
+                    contextUsage={contextUsage}
+                    onCompact={() => handleCompactNow()}
+                    compactState={compactState}
                   />
                 </div>
               </div>
@@ -2099,6 +2242,9 @@ function App() {
                     onReasoningEffortChange={setReasoningEffort}
                     voiceAgent={voiceAgent}
                     capture={capture}
+                    contextUsage={contextUsage}
+                    onCompact={() => handleCompactNow()}
+                    compactState={compactState}
                   />
                 </div>
               </div>

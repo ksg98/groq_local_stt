@@ -293,6 +293,8 @@ contextBridge.exposeInMainWorld('electron', {
     delete: (chatId) => ipcRenderer.invoke('chat-history-delete', chatId),
     // Title comes from the chat's own model, so the chat id rides along
     generateTitle: (userMessage, chatId) => ipcRenderer.invoke('chat-history-generate-title', userMessage, chatId),
+    // Summarize the conversation so far; resolves { summary } or { error }
+    compact: (messages, model, options) => ipcRenderer.invoke('chat-history-compact', messages, model, options),
   },
 
   // --- Projects: instructions + reference files shared by a group of chats ---

@@ -1,3 +1,4 @@
+import ContextMeter from './ContextMeter';
 import { ArrowUp, Loader2, ImagePlus, Hammer, Upload, Zap, ZapOff, Square, Mic, MicOff, X, AudioLines, Monitor, Camera, Volume2, VolumeX, Check, Hand, Pause, Play } from "lucide-react";
 import React, { useContext, useEffect, useRef, useState, useMemo, useCallback } from "react";
 import TextAreaAutosize from "react-textarea-autosize";
@@ -19,6 +20,9 @@ function ChatInput({
 	onOpenMcpTools,
 	modelConfigs = {},
 	reasoningEffort = "medium",
+	contextUsage = null,
+	onCompact,
+	compactState = null,
 	onReasoningEffortChange,
 	voiceAgent = null,
 	capture = null,
@@ -581,6 +585,23 @@ function ChatInput({
 				</div>
 			)}
 
+			{/* Compaction progress / result, and a hint while typing a slash command */}
+			{compactState ? (
+				<div
+					className={cn(
+						"flex items-center gap-2 px-1 text-xs",
+						compactState.state === 'error' ? "text-destructive" : "text-muted-foreground"
+					)}
+				>
+					{compactState.state === 'running' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+					<span>{compactState.message}</span>
+				</div>
+			) : /^\/[a-z]*$/i.test(message.trim()) && '/compact'.startsWith(message.trim().toLowerCase()) ? (
+				<div className="px-1 text-xs text-muted-foreground">
+					<span className="font-mono text-foreground">/compact</span> [instructions] summarizes the conversation to free up context
+				</div>
+			) : null}
+
 			<div className="flex flex-col gap-3">
 				{/* Input Area with Submit Button */}
 				<div className="flex items-center gap-3">
@@ -892,6 +913,9 @@ function ChatInput({
 							</div>
 						)}
 						
+						{/* How full the context window is */}
+						<ContextMeter usage={contextUsage} onCompact={onCompact} disabled={loading} />
+
 						{/* Reasoning Effort Selector (only for models that support it) */}
 						{effortOptions.length > 0 && (
 							<SearchableSelect

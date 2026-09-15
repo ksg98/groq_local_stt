@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Eye, EyeOff, Plus, Trash2, Edit3, Save, X, RefreshCw, Key, Settings as SettingsIcon, Zap, Cpu, Server, AlertCircle, CheckCircle, Mic, Volume2, Globe, Palette, BookOpen } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Plus, Trash2, Edit3, Save, X, RefreshCw, Key, Settings as SettingsIcon, Zap, Cpu, Server, AlertCircle, CheckCircle, Mic, Volume2, Globe, Palette, BookOpen, Layers } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -2125,6 +2125,81 @@ function Settings() {
                     playing message changes it too.
                   </p>
                 </div>
+              </CardContent>
+            </Card>
+
+            {/* Context & compaction */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <Layers className="h-5 w-5 text-primary" />
+                  <span>Context &amp; Compaction</span>
+                </CardTitle>
+                <CardDescription>
+                  How much conversation the model can see, and summarizing it when it fills up
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                <div className="space-y-2">
+                  <Label>Context window</Label>
+                  <Select
+                    value={String(settings.contextWindow ?? 'auto')}
+                    onValueChange={(value) => handleSelectChange('contextWindow', value === 'auto' ? 'auto' : Number(value))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Model's limit" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">Model&apos;s limit (1M when unknown)</SelectItem>
+                      <SelectItem value="128000">128K</SelectItem>
+                      <SelectItem value="200000">200K</SelectItem>
+                      <SelectItem value="400000">400K</SelectItem>
+                      <SelectItem value="1000000">1M</SelectItem>
+                      <SelectItem value="2000000">2M</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Drives the meter beside the model picker. Uses the window the provider reports for the
+                    model; local server models do not report one, so they count against 1M.
+                  </p>
+                </div>
+
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="auto-compact" className="font-medium">Auto-compact</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Before sending a message that would fill the window past the threshold, the chat&apos;s model
+                      summarizes the conversation and the summary replaces the older messages. Type /compact to do
+                      it any time, optionally followed by what to focus on. Chats under 25K tokens are never compacted.
+                    </p>
+                  </div>
+                  <Switch
+                    id="auto-compact"
+                    checked={settings.autoCompact !== false}
+                    onChange={(e) => handleToggleChange('autoCompact', e.target.checked)}
+                  />
+                </div>
+
+                {settings.autoCompact !== false && (
+                  <div className="space-y-2">
+                    <Label>Compact when the window is</Label>
+                    <Select
+                      value={String(settings.autoCompactThreshold ?? 0.85)}
+                      onValueChange={(value) => handleSelectChange('autoCompactThreshold', parseFloat(value))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="85% full" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[0.7, 0.8, 0.85, 0.9, 0.95].map((value) => (
+                          <SelectItem key={value} value={String(value)}>
+                            {Math.round(value * 100)}% full
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </CardContent>
             </Card>
 

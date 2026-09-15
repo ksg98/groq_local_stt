@@ -55,7 +55,7 @@ function ToolApprovalModal({ toolCall, onApprove }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-background/85 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="glass-card w-full max-w-xl rounded-lg overflow-hidden flex flex-col">
         <div className="p-4 border-b border-border">
           <h2 className="text-lg font-semibold text-foreground flex items-center">

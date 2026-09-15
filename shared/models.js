@@ -29,6 +29,8 @@ function applyModelHeuristics(modelId, apiModelData) {
   
   return {
     context,
+    // false when the API gave no context_window and the 8192 default is a guess
+    contextReported: !!apiModelData?.context_window,
     vision_supported,
     builtin_tools_supported,
     provider: 'groq',
@@ -180,6 +182,7 @@ function getModelContextSizes(customModels = {}, apiModels = null, providerModel
     // Use explicit configuration only - no name-based heuristic
     mergedModels[modelId] = {
       context: config.context || 8192,
+      contextReported: !!config.context,
       vision_supported: config.vision_supported || false,
       builtin_tools_supported: config.builtin_tools_supported || false,
       displayName: config.displayName || modelId,

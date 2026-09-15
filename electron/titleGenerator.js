@@ -81,16 +81,16 @@ function userPrompt(text) {
   return `Generate a short title for a conversation that starts with this message:\n\n${text}`;
 }
 
-async function titleWithAnthropic(text, model, settings, modelInfo) {
+async function textWithAnthropic({ system, prompt, maxTokens }, model, settings, modelInfo) {
   if (!settings.ANTHROPIC_API_KEY || !settings.ANTHROPIC_API_KEY.trim()) {
     throw new Error('Anthropic API key not configured');
   }
   const client = new Anthropic({ apiKey: settings.ANTHROPIC_API_KEY });
   const params = {
     model,
-    max_tokens: 512,
-    system: TITLE_SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: userPrompt(text) }],
+    max_tokens: maxTokens,
+    system,
+    messages: [{ role: 'user', content: prompt }],
   };
   // Adaptive-thinking models: ask for the lightest effort they support.
   // Everything else: omit thinking entirely (accepted by every model).
@@ -107,7 +107,7 @@ async function titleWithAnthropic(text, model, settings, modelInfo) {
     .join('');
 }
 
-async function titleWithOpenAI(text, model, settings, modelInfo) {
+async function textWithOpenAI({ system, prompt }, model, settings, modelInfo) {
   const useChatGpt = model.startsWith(CHATGPT_MODEL_PREFIX);
   const apiModel = useChatGpt ? model.slice(CHATGPT_MODEL_PREFIX.length) : model;
   let client;
@@ -134,8 +134,8 @@ async function titleWithOpenAI(text, model, settings, modelInfo) {
 
   const params = {
     model: apiModel,
-    input: [{ role: 'user', content: userPrompt(text) }],
-    instructions: TITLE_SYSTEM_PROMPT,
+    input: [{ role: 'user', content: prompt }],
+    instructions: system,
     store: false,
   };
   const effort = lowestEffort(modelInfo?.reasoning?.efforts);
@@ -156,24 +156,38 @@ async function titleWithOpenAI(text, model, settings, modelInfo) {
   return response.output_text || '';
 }
 
-async function titleWithGroqCompatible(text, model, settings, modelInfo, createGroqClient) {
+async function textWithGroqCompatible({ system, prompt, maxTokens, temperature }, model, settings, modelInfo, createGroqClient) {
   const groq = createGroqClient(model, settings);
   const isLocalModel = model.startsWith(LOCAL_MODEL_PREFIX);
   const params = {
     model: isLocalModel ? model.slice(LOCAL_MODEL_PREFIX.length) : model,
     messages: [
-      { role: 'system', content: TITLE_SYSTEM_PROMPT },
-      { role: 'user', content: userPrompt(text) },
+      { role: 'system', content: system },
+      { role: 'user', content: prompt },
     ],
-    temperature: 0.3,
-    // Reasoning models spend part of this budget thinking before the title
-    max_tokens: 512,
+    temperature,
+    // Reasoning models spend part of this budget thinking before answering
+    max_tokens: maxTokens,
     stream: false,
   };
   const effort = lowestEffort(modelInfo?.reasoning?.efforts);
   if (effort) params.reasoning_effort = effort;
   const response = await groq.chat.completions.create(params);
   return response.choices?.[0]?.message?.content || '';
+}
+
+/**
+ * One non-streaming completion through the model's own provider transport.
+ * Used for side requests (titles, conversation compaction). Throws on failure.
+ */
+async function completeText({ system, prompt, model, settings, modelContextSizes, createGroqClient, maxTokens = 512, temperature = 0.3 }) {
+  const catalog = modelContextSizes || {};
+  const provider = getProviderForModel(model, catalog);
+  const modelInfo = catalog[model] || {};
+  const request = { system, prompt, maxTokens, temperature };
+  if (provider === 'anthropic') return textWithAnthropic(request, model, settings, modelInfo);
+  if (provider === 'openai') return textWithOpenAI(request, model, settings, modelInfo);
+  return textWithGroqCompatible(request, model, settings, modelInfo, createGroqClient);
 }
 
 /**
@@ -191,19 +205,17 @@ async function generateTitle({ userMessage, model, settings, modelContextSizes, 
   if (!text) return 'New Chat';
   if (!model || typeof model !== 'string') return fallbackTitle(text);
 
-  const catalog = modelContextSizes || {};
-  const provider = getProviderForModel(model, catalog);
-  const modelInfo = catalog[model] || {};
-
   try {
-    let raw;
-    if (provider === 'anthropic') {
-      raw = await titleWithAnthropic(text, model, settings, modelInfo);
-    } else if (provider === 'openai') {
-      raw = await titleWithOpenAI(text, model, settings, modelInfo);
-    } else {
-      raw = await titleWithGroqCompatible(text, model, settings, modelInfo, createGroqClient);
-    }
+    const raw = await completeText({
+      system: TITLE_SYSTEM_PROMPT,
+      prompt: userPrompt(text),
+      model,
+      settings,
+      modelContextSizes,
+      createGroqClient,
+      maxTokens: 512,
+      temperature: 0.3,
+    });
     const title = cleanTitle(raw);
     if (title) return title;
     console.warn(`[TitleGenerator] ${model} returned no usable title, using message text`);
@@ -213,4 +225,4 @@ async function generateTitle({ userMessage, model, settings, modelContextSizes, 
   return fallbackTitle(text);
 }
 
-module.exports = { generateTitle, cleanTitle, fallbackTitle, messageText };
+module.exports = { generateTitle, completeText, cleanTitle, fallbackTitle, messageText };
