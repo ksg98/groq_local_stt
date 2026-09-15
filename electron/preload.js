@@ -280,12 +280,28 @@ contextBridge.exposeInMainWorld('electron', {
   chatHistory: {
     list: () => ipcRenderer.invoke('chat-history-list'),
     load: (chatId) => ipcRenderer.invoke('chat-history-load', chatId),
-    create: (model, useResponsesApi) => ipcRenderer.invoke('chat-history-create', model, useResponsesApi),
+    create: (model, useResponsesApi, projectId) => ipcRenderer.invoke('chat-history-create', model, useResponsesApi, projectId || null),
     save: (chat) => ipcRenderer.invoke('chat-history-save', chat),
     updateMessages: (chatId, messages) => ipcRenderer.invoke('chat-history-update-messages', chatId, messages),
     updateTitle: (chatId, title) => ipcRenderer.invoke('chat-history-update-title', chatId, title),
     delete: (chatId) => ipcRenderer.invoke('chat-history-delete', chatId),
-    generateTitle: (userMessage) => ipcRenderer.invoke('chat-history-generate-title', userMessage),
+    // Title comes from the chat's own model, so the chat id rides along
+    generateTitle: (userMessage, chatId) => ipcRenderer.invoke('chat-history-generate-title', userMessage, chatId),
+  },
+
+  // --- Projects: instructions + reference files shared by a group of chats ---
+  projects: {
+    list: () => ipcRenderer.invoke('projects-list'),
+    get: (projectId) => ipcRenderer.invoke('projects-get', projectId),
+    create: (data) => ipcRenderer.invoke('projects-create', data),
+    update: (projectId, patch) => ipcRenderer.invoke('projects-update', projectId, patch),
+    delete: (projectId) => ipcRenderer.invoke('projects-delete', projectId),
+    // Native file picker; files are read by the main process
+    pickFiles: (projectId) => ipcRenderer.invoke('projects-pick-files', projectId),
+    // Dropped file: { name, type, data: Uint8Array }
+    addFile: (projectId, file) => ipcRenderer.invoke('projects-add-file', projectId, file),
+    removeFile: (projectId, fileId) => ipcRenderer.invoke('projects-remove-file', projectId, fileId),
+    readFile: (projectId, fileId) => ipcRenderer.invoke('projects-read-file', projectId, fileId),
   },
 
   // Generic IPC renderer access (kept for backward compatibility)

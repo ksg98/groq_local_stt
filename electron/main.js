@@ -57,8 +57,9 @@ const chatgptAuthManager = require('./chatgptAuthManager');
 const ContextCapture = require('./contextCapture');
 const PopupWindowManager = require('./popupWindow');
 
-// Import chat history manager
+// Import chat history and projects managers
 const chatHistoryManager = require('./chatHistoryManager');
+const projectsManager = require('./projectsManager');
 
 // Import speech-to-text handler
 const speechToTextHandler = require('./speechToTextHandler');
@@ -73,6 +74,32 @@ let mainWindow;
 
 // Variable to hold loaded model context sizes
 let modelContextSizes = {};
+
+/**
+ * The merged model catalog for a request: live Groq models (cached), live
+ * OpenAI/Anthropic/local lists (cached, static fallback) and custom models
+ * from settings. Used by chat streams and by chat title generation.
+ */
+async function buildModelCatalog(currentSettings) {
+  let apiModels = modelContextSizes;
+  if (currentSettings.GROQ_API_KEY && currentSettings.GROQ_API_KEY !== "<replace me>") {
+    try {
+      apiModels = await getModelsFromAPIWithCache(currentSettings.GROQ_API_KEY);
+    } catch (error) {
+      console.error('Error fetching models for catalog:', error);
+      // Fall back to cached modelContextSizes
+    }
+  }
+
+  let providerModels = null;
+  try {
+    providerModels = await getProviderModels(currentSettings);
+  } catch (error) {
+    console.error('Error fetching provider models for catalog:', error);
+  }
+
+  return getModelContextSizes(currentSettings.customModels || {}, apiModels, providerModels);
+}
 
 // --- Context Sharing State ---
 let pendingContext = null; // Holds context to be passed to renderer
@@ -397,10 +424,16 @@ app.whenReady().then(async () => {
   // Initialize settings handlers (needs app)
   initializeSettingsHandlers(ipcMain, app);
 
-  // Initialize chat history manager
-  chatHistoryManager.initialize(app, loadSettings);
+  // Initialize chat history manager (title generation needs the live model
+  // catalog to pick the chat model's provider and reasoning options)
+  chatHistoryManager.initialize(app, loadSettings, buildModelCatalog);
   chatHistoryManager.initializeChatHistoryHandlers(ipcMain);
   console.log("[Main Init] Chat history manager initialized");
+
+  // Initialize projects (instructions + files folded into the system prompt)
+  projectsManager.initialize(app, chatHistoryManager);
+  projectsManager.initializeProjectHandlers(ipcMain);
+  console.log("[Main Init] Projects manager initialized");
 
   // Initialize speech-to-text handler
   speechToTextHandler.initializeSpeechToTextHandlers(ipcMain, loadSettings);
@@ -452,30 +485,14 @@ app.whenReady().then(async () => {
   // --- Register Core App IPC Handlers --- //
   // Chat completion (use module object)
   ipcMain.on('chat-stream', async (event, messages, model, options) => {
-    const currentSettings = loadSettings();
+    const loadedSettings = loadSettings();
     const { discoveredTools } = mcpManager.getMcpState(); // Use module object
 
-    // Try to get fresh models from API
-    let apiModels = modelContextSizes;
-    if (currentSettings.GROQ_API_KEY && currentSettings.GROQ_API_KEY !== "<replace me>") {
-      try {
-        apiModels = await getModelsFromAPIWithCache(currentSettings.GROQ_API_KEY);
-      } catch (error) {
-        console.error('Error fetching models in chat-stream:', error);
-        // Fall back to cached modelContextSizes
-      }
-    }
+    // A chat inside a project carries the project's instructions and files
+    // in its system prompt (replacing or following the Settings prompt)
+    const currentSettings = projectsManager.applyProjectToSettings(loadedSettings, options?.projectId);
 
-    // Fetch OpenAI/Anthropic model lists dynamically (cached, static fallback)
-    let providerModels = null;
-    try {
-      providerModels = await getProviderModels(currentSettings);
-    } catch (error) {
-      console.error('Error fetching provider models in chat-stream:', error);
-    }
-
-    // Merge API models with custom models from settings
-    const mergedModelContextSizes = getModelContextSizes(currentSettings.customModels || {}, apiModels, providerModels);
+    const mergedModelContextSizes = await buildModelCatalog(currentSettings);
 
     // Add the built-in web search tool (Firecrawl/Tavily) when enabled in settings
     const allTools = [...discoveredTools, ...webSearchHandler.getWebSearchTools(currentSettings)];

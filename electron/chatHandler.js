@@ -45,6 +45,53 @@ function validateApiKey(settings) {
     }
 }
 
+/**
+ * Groq SDK client for a model served over the chat-completions transport:
+ * Groq itself, the custom base URL from Settings, or the local server slot
+ * for 'local:*' models (which needs no Groq key). Shared by the chat stream
+ * and title generation so both talk to the same endpoint.
+ */
+function createGroqClient(model, settings) {
+    const isLocalModel = typeof model === 'string' && model.startsWith(LOCAL_MODEL_PREFIX);
+    const groqConfig = { apiKey: settings.GROQ_API_KEY };
+
+    if (isLocalModel) {
+        const localBaseUrl = (settings.localLlmBaseUrl || '').trim();
+        if (!settings.localLlmEnabled || !localBaseUrl) {
+            throw new Error('Local model server is not enabled. Configure it in Settings > Local Model Server.');
+        }
+        groqConfig.apiKey = (settings.localLlmApiKey || '').trim() || 'local';
+        groqConfig.baseURL = localBaseUrl;
+    } else if (settings.customApiBaseUrlEnabled && settings.customApiBaseUrl && settings.customApiBaseUrl.trim()) {
+        // Use custom API base URL if enabled and provided (use exactly as provided)
+        groqConfig.baseURL = settings.customApiBaseUrl.trim();
+    }
+
+    const groq = new Groq(groqConfig);
+
+    // Monkey patch the SDK when using a non-Groq baseURL
+    // The baseURL should end with /v1/ (e.g., http://example.com/v1/ or https://api.groq.com/openai/v1/)
+    if (groqConfig.baseURL) {
+        const originalPost = groq.post.bind(groq);
+        const originalBuildURL = groq.buildURL.bind(groq);
+
+        // Intercept buildURL to strip /openai/v1/ prefix since custom baseURL includes the full path
+        groq.buildURL = function(path, query, defaultBaseURL) {
+            // Strip the /openai/v1/ prefix - custom baseURL should include the full path up to /v1/
+            if (path.startsWith('/openai/v1/')) {
+                path = path.replace(/^\/openai\/v1/, '');
+            }
+            return originalBuildURL(path, query, defaultBaseURL);
+        };
+
+        groq.post = function(path, ...args) {
+            return originalPost(path, ...args);
+        };
+    }
+
+    return groq;
+}
+
 function determineModel(model, settings, modelContextSizes) {
     const modelToUse = model || settings.model || "llama-3.3-70b-versatile";
     const modelInfo = modelContextSizes[modelToUse] || modelContextSizes['default'] || { context: 8192 };
@@ -1010,6 +1057,14 @@ async function handleResponsesApiStream(event, messages, model, settings, modelC
             });
         }
 
+        // The custom system prompt (Settings, or a project's instructions
+        // merged into it) applies here too, not only on the completions path.
+        if (settings.customSystemPrompt && settings.customSystemPrompt.trim()) {
+            instructions = instructions
+                ? `${instructions}\n\n${settings.customSystemPrompt.trim()}`
+                : settings.customSystemPrompt.trim();
+        }
+
         const apiParams = {
             model: modelToUse,
             stream: true,
@@ -1518,42 +1573,8 @@ async function handleChatStream(event, messages, model, settings, modelContextSi
         // the request itself and that error is surfaced like any other.
         const { modelToUse } = determineModel(model, settings, modelContextSizes);
 
-        const groqConfig = { apiKey: settings.GROQ_API_KEY };
+        const groq = createGroqClient(model, settings);
 
-        if (isLocalModel) {
-            const localBaseUrl = (settings.localLlmBaseUrl || '').trim();
-            if (!settings.localLlmEnabled || !localBaseUrl) {
-                throw new Error('Local model server is not enabled. Configure it in Settings > Local Model Server.');
-            }
-            groqConfig.apiKey = (settings.localLlmApiKey || '').trim() || 'local';
-            groqConfig.baseURL = localBaseUrl;
-        } else if (settings.customApiBaseUrlEnabled && settings.customApiBaseUrl && settings.customApiBaseUrl.trim()) {
-            // Use custom API base URL if enabled and provided (use exactly as provided)
-            groqConfig.baseURL = settings.customApiBaseUrl.trim();
-        }
-
-        const groq = new Groq(groqConfig);
-
-        // Monkey patch the SDK when using a non-Groq baseURL
-        // The baseURL should end with /v1/ (e.g., http://example.com/v1/ or https://api.groq.com/openai/v1/)
-        if (groqConfig.baseURL) {
-            const originalPost = groq.post.bind(groq);
-            const originalBuildURL = groq.buildURL.bind(groq);
-            
-            // Intercept buildURL to strip /openai/v1/ prefix since custom baseURL includes the full path
-            groq.buildURL = function(path, query, defaultBaseURL) {
-                // Strip the /openai/v1/ prefix - custom baseURL should include the full path up to /v1/
-                if (path.startsWith('/openai/v1/')) {
-                    path = path.replace(/^\/openai\/v1/, '');
-                }
-                return originalBuildURL(path, query, defaultBaseURL);
-            };
-            
-            groq.post = function(path, ...args) {
-                return originalPost(path, ...args);
-            };
-        }
-        
         const tools = prepareTools(discoveredTools);
         const cleanedMessages = cleanMessages(messages);
         const prunedMessages = pruneMessageHistory(cleanedMessages, modelToUse, modelContextSizes);
@@ -1602,4 +1623,4 @@ function stopChatStream(streamId) {
 // NOTE: handleMcpApprovalResponse removed - Groq does not yet support mcp_approval_response
 // When Groq adds support, this function can be re-implemented to handle approval flow
 
-module.exports = { handleChatStream, stopChatStream };
+module.exports = { handleChatStream, stopChatStream, createGroqClient };

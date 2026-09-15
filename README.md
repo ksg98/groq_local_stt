@@ -26,6 +26,7 @@ xattr -c /Applications/Groq\ Desktop.app
 
 - Chat interface with image support
 - Local MCP servers
+- Projects: shared instructions and reference files (text, code, PDF, Word) for a group of chats, with an option to override the custom system prompt from Settings
 
 ## Prerequisites
 

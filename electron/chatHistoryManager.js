@@ -1,19 +1,23 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const Groq = require('groq-sdk');
+const titleGenerator = require('./titleGenerator');
+const { createGroqClient } = require('./chatHandler');
 
 let appInstance = null;
 let settingsLoader = null;
+let modelCatalogLoader = null;
 
 /**
  * Initialize the chat history manager with app instance and settings loader
  * @param {Electron.App} app - The Electron app instance
  * @param {Function} loadSettings - Function to load settings
+ * @param {Function} [loadModelCatalog] - async (settings) => merged model catalog
  */
-function initialize(app, loadSettings) {
+function initialize(app, loadSettings, loadModelCatalog) {
     appInstance = app;
     settingsLoader = loadSettings;
+    modelCatalogLoader = loadModelCatalog || null;
 }
 
 /**
@@ -48,9 +52,10 @@ function getChatFilePath(chatId) {
  * Create a new chat with an optional initial message
  * @param {string} model - The model used for this chat
  * @param {boolean} useResponsesApi - Whether this chat uses Responses API
+ * @param {string|null} projectId - Project this chat belongs to, if any
  * @returns {Object} The new chat object
  */
-function createChat(model = 'llama-3.3-70b-versatile', useResponsesApi = false) {
+function createChat(model = 'llama-3.3-70b-versatile', useResponsesApi = false, projectId = null) {
     const now = new Date().toISOString();
     const chat = {
         id: crypto.randomUUID(),
@@ -59,6 +64,7 @@ function createChat(model = 'llama-3.3-70b-versatile', useResponsesApi = false) 
         updatedAt: now,
         model: model,
         useResponsesApi: useResponsesApi,
+        projectId: typeof projectId === 'string' && projectId ? projectId : null,
         messages: []
     };
     
@@ -164,7 +170,8 @@ function listChats() {
                         updatedAt: chat.updatedAt,
                         model: chat.model,
                         messageCount: chat.messages?.length || 0,
-                        useResponsesApi: chat.useResponsesApi || false
+                        useResponsesApi: chat.useResponsesApi || false,
+                        projectId: chat.projectId || null
                     });
                 } catch (error) {
                     console.error(`Error reading chat file ${file}:`, error);
@@ -216,72 +223,57 @@ function updateChatTitle(chatId, title) {
 }
 
 /**
- * Generate a title for a chat based on the first user message
- * Uses llama-3.1-8b-instant for fast title generation
- * @param {string} userMessage - The first user message content
- * @returns {Promise<string>} Generated title
+ * Delete every chat that belongs to a project
+ * @param {string} projectId
+ * @returns {number} how many chats were removed
  */
-async function generateChatTitle(userMessage) {
+function deleteChatsForProject(projectId) {
+    if (!projectId) return 0;
+    let removed = 0;
+    for (const chat of listChats()) {
+        if (chat.projectId === projectId && deleteChat(chat.id)) removed++;
+    }
+    return removed;
+}
+
+/**
+ * Generate a title for a chat based on its first user message. The request
+ * goes to the chat's own model through its own provider, so it works for
+ * every provider the app can chat with and never depends on a pinned model.
+ * @param {string|Array} userMessage - The first user message content
+ * @param {string} [chatId] - Chat whose model should produce the title
+ * @returns {Promise<string>} Generated title (a text-derived fallback on failure)
+ */
+async function generateChatTitle(userMessage, chatId) {
     if (!settingsLoader) {
         console.error('Settings loader not initialized');
         return 'New Chat';
     }
-    
+
     const settings = settingsLoader();
-    
-    if (!settings.GROQ_API_KEY || settings.GROQ_API_KEY === '<replace me>') {
-        console.warn('API key not configured, using default title');
-        return 'New Chat';
-    }
-    
-    try {
-        const groq = new Groq({ apiKey: settings.GROQ_API_KEY });
-        
-        // Extract text content if structured message
-        let textContent = userMessage;
-        if (typeof userMessage !== 'string') {
-            if (Array.isArray(userMessage)) {
-                textContent = userMessage
-                    .filter(part => part.type === 'text')
-                    .map(part => part.text)
-                    .join(' ');
-            } else {
-                textContent = JSON.stringify(userMessage);
-            }
+    const chat = chatId ? loadChat(chatId) : null;
+    const model = chat?.model || settings.model;
+    const startedAt = Date.now();
+
+    let modelContextSizes = {};
+    if (modelCatalogLoader) {
+        try {
+            modelContextSizes = await modelCatalogLoader(settings);
+        } catch (error) {
+            console.error('[ChatHistory] Could not load model catalog for title:', error.message);
         }
-        
-        // Limit the input to first 500 characters
-        const truncatedMessage = textContent.slice(0, 500);
-        
-        const response = await groq.chat.completions.create({
-            messages: [
-                {
-                    role: 'system',
-                    content: 'You are a helpful assistant that generates short, concise titles for chat conversations. Generate a title of 3-6 words that summarizes the topic or question. Do not use quotes or punctuation. Just output the title, nothing else.'
-                },
-                {
-                    role: 'user',
-                    content: `Generate a short title for a conversation that starts with this message:\n\n${truncatedMessage}`
-                }
-            ],
-            model: 'llama-3.1-8b-instant',
-            temperature: 0.3,
-            max_tokens: 20,
-            stream: false
-        });
-        
-        const title = response.choices[0]?.message?.content?.trim() || 'New Chat';
-        
-        // Clean up the title - remove quotes and limit length
-        return title
-            .replace(/^["']|["']$/g, '') // Remove surrounding quotes
-            .replace(/^Title:\s*/i, '') // Remove "Title:" prefix if present
-            .slice(0, 50); // Limit length
-            
-    } catch (error) {
-        console.error('Error generating chat title:', error);
-        return 'New Chat';
     }
+    const catalogMs = Date.now() - startedAt;
+
+    const title = await titleGenerator.generateTitle({
+        userMessage,
+        model,
+        settings,
+        modelContextSizes,
+        createGroqClient
+    });
+    console.log(`[ChatHistory] Title via ${model}: "${title}" (${Date.now() - startedAt}ms, catalog ${catalogMs}ms)`);
+    return title;
 }
 
 /**
@@ -299,9 +291,9 @@ function initializeChatHistoryHandlers(ipcMain) {
         return loadChat(chatId);
     });
     
-    // Create a new chat
-    ipcMain.handle('chat-history-create', async (event, model, useResponsesApi) => {
-        return createChat(model, useResponsesApi);
+    // Create a new chat (optionally inside a project)
+    ipcMain.handle('chat-history-create', async (event, model, useResponsesApi, projectId) => {
+        return createChat(model, useResponsesApi, projectId);
     });
     
     // Save/update a chat
@@ -326,9 +318,9 @@ function initializeChatHistoryHandlers(ipcMain) {
         return { success };
     });
     
-    // Generate a title for a chat
-    ipcMain.handle('chat-history-generate-title', async (event, userMessage) => {
-        return generateChatTitle(userMessage);
+    // Generate a title for a chat, using that chat's model
+    ipcMain.handle('chat-history-generate-title', async (event, userMessage, chatId) => {
+        return generateChatTitle(userMessage, chatId);
     });
 }
 
@@ -339,6 +331,7 @@ module.exports = {
     loadChat,
     saveChat,
     deleteChat,
+    deleteChatsForProject,
     listChats,
     updateChatMessages,
     updateChatTitle,

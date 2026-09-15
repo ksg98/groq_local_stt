@@ -6,13 +6,14 @@ import ToolsPanel from './components/ToolsPanel';
 import ToolApprovalModal from './components/ToolApprovalModal';
 import ChatHistorySidebar from './components/ChatHistorySidebar';
 import ScreenSourcePicker from './components/ScreenSourcePicker';
+import { ProjectKnowledgePanel, ProjectModal, ProjectKnowledgeModal } from './components/ProjectPanel';
 import { useChat } from './context/ChatContext'; // Import useChat hook
 import { useVoiceAgent, SPEED_STEPS } from './hooks/useVoiceAgent';
 import { buildFrameParts, mergeFinalFrame, pruneHistoryImages } from './lib/frameBank';
 import { useMediaCapture } from './hooks/useMediaCapture';
 // Import shared model definitions - REMOVED
 // import { MODEL_CONTEXT_SIZES } from '../../shared/models';
-import { Settings, Zap, MessageSquare, PanelLeftClose, PanelLeft, Radio, MessagesSquare } from 'lucide-react';
+import { Settings, Zap, MessageSquare, PanelLeftClose, PanelLeft, Radio, MessagesSquare, FolderOpen, Pencil } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { Badge } from './components/ui/badge';
 
@@ -80,9 +81,14 @@ function App() {
     startFreshChat,
     isSidebarCollapsed,
     toggleSidebar,
-    needsTitleGeneration
+    needsTitleGeneration,
+    currentProject,
+    currentProjectId
   } = useChat(); // Use context state
   const [loading, setLoading] = useState(false);
+  // Project dialogs: { mode: 'create' | 'edit', project } and the knowledge panel
+  const [projectModal, setProjectModal] = useState(null);
+  const [projectKnowledgeOpen, setProjectKnowledgeOpen] = useState(false);
   const [selectedModel, setSelectedModel] = useState('llama-3.3-70b-versatile');
   const [reasoningEffort, setReasoningEffort] = useState('medium');
   const [mcpTools, setMcpTools] = useState([]);
@@ -799,7 +805,12 @@ function App() {
         // Start streaming chat
         // Old screenshots leave the payload here; the chat on screen keeps them
         const apiMessages = pruneHistoryImages(turnMessages, frameSettingsRef.current.historyTurns);
-        const streamHandler = window.electron.startChatStream(apiMessages, selectedModel, { reasoningEffort });
+        // A chat inside a project sends its id so the main process can fold
+        // the project's instructions and files into the system prompt
+        const streamHandler = window.electron.startChatStream(apiMessages, selectedModel, {
+          reasoningEffort,
+          projectId: currentProjectId || null,
+        });
 
             // Collect the final message data
         let finalAssistantData = {
@@ -1851,10 +1862,13 @@ function App() {
   return (
     <div className="flex h-screen">
       {/* Chat History Sidebar */}
-      <ChatHistorySidebar 
+      <ChatHistorySidebar
         onNewChat={handleNewChat}
         onChatLoaded={handleChatLoaded}
         loading={loading}
+        onCreateProject={() => setProjectModal({ mode: 'create', project: null })}
+        onEditProject={(project) => setProjectModal({ mode: 'edit', project })}
+        onOpenProjectKnowledge={() => setProjectKnowledgeOpen(true)}
       />
       
       {/* Main Content Area */}
@@ -1893,7 +1907,7 @@ function App() {
               )}
               
               {/* API Mode Indicator */}
-              <span 
+              <span
                 className="text-xs text-muted-foreground flex items-center gap-1 cursor-default"
                 title={useResponsesApi ? "Using Responses API (supports agentic features)" : "Using Chat Completions API"}
               >
@@ -1909,6 +1923,19 @@ function App() {
                   </>
                 )}
               </span>
+
+              {/* Active project — opens its instructions & files */}
+              {currentProject && (
+                <button
+                  type="button"
+                  onClick={() => setProjectKnowledgeOpen(true)}
+                  className="flex items-center gap-1.5 max-w-[240px] rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-medium text-foreground hover:bg-primary/15 transition-colors"
+                  title={`Project: ${currentProject.name} — click to view instructions and files`}
+                >
+                  <FolderOpen className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                  <span className="truncate">{currentProject.name}</span>
+                </button>
+              )}
             </div>
 
             <div className="flex items-center space-x-2">
@@ -1941,7 +1968,55 @@ function App() {
         <div className="flex-1 overflow-y-auto">
           <div className="max-w-[1600px] mx-auto py-8 px-8 h-full">
             <div className="h-full">
-            {messages.length === 0 ? (
+            {messages.length === 0 && currentProject ? (
+              /* Project home: start a chat here, manage instructions & files */
+              <div className="flex flex-col items-center min-h-full space-y-8 py-4">
+                <div className="w-full max-w-3xl text-center space-y-3">
+                  <div className="flex items-center justify-center gap-2">
+                    <FolderOpen className="h-7 w-7 text-primary" />
+                    <h1 className="text-3xl font-bold truncate">{currentProject.name}</h1>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                      onClick={() => setProjectModal({ mode: 'edit', project: currentProject })}
+                      title="Edit project name and description"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  {currentProject.description ? (
+                    <p className="text-lg text-muted-foreground max-w-2xl mx-auto">{currentProject.description}</p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      Chats started here share the instructions and files of this project.
+                    </p>
+                  )}
+                </div>
+
+                {/* Chat Input */}
+                <div className="w-full max-w-2xl">
+                  <ChatInput
+                    onSendMessage={handleSendMessage}
+                    onStopGeneration={handleStopGeneration}
+                    loading={loading}
+                    models={sortedModels}
+                    selectedModel={selectedModel}
+                    onModelChange={setSelectedModel}
+                    onOpenMcpTools={() => setIsToolsPanelOpen(true)}
+                    modelConfigs={modelConfigs}
+                    reasoningEffort={reasoningEffort}
+                    onReasoningEffortChange={setReasoningEffort}
+                    voiceAgent={voiceAgent}
+                    capture={capture}
+                  />
+                </div>
+
+                <div className="w-full max-w-3xl">
+                  <ProjectKnowledgePanel project={currentProject} />
+                </div>
+              </div>
+            ) : messages.length === 0 ? (
               /* Welcome Screen */
               <div className="flex flex-col items-center justify-center h-full space-y-8">
                 <div className="text-center space-y-4">
@@ -2037,6 +2112,25 @@ function App() {
           sources={capture.sources}
           onSelect={capture.startScreenshare}
           onClose={() => capture.setPickerOpen(false)}
+        />
+      )}
+
+      {projectModal && (
+        <ProjectModal
+          mode={projectModal.mode}
+          project={projectModal.project}
+          onClose={() => setProjectModal(null)}
+        />
+      )}
+
+      {projectKnowledgeOpen && currentProject && (
+        <ProjectKnowledgeModal
+          project={currentProject}
+          onClose={() => setProjectKnowledgeOpen(false)}
+          onEdit={() => {
+            setProjectKnowledgeOpen(false);
+            setProjectModal({ mode: 'edit', project: currentProject });
+          }}
         />
       )}
       </div>

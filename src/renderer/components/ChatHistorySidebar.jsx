@@ -1,14 +1,21 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useChat } from '../context/ChatContext';
 import { Button } from './ui/button';
-import { 
-  MessageSquare, 
-  Plus, 
-  ChevronLeft, 
-  ChevronRight, 
-  Trash2, 
+import {
+  MessageSquare,
+  Plus,
+  ChevronLeft,
+  ChevronRight,
+  Trash2,
   MoreVertical,
-  Clock
+  Clock,
+  Folder,
+  FolderOpen,
+  FolderPlus,
+  ArrowLeft,
+  Pencil,
+  BookOpen,
+  FileText
 } from 'lucide-react';
 
 // LocalStorage key for sidebar width
@@ -31,7 +38,7 @@ function formatRelativeTime(dateString) {
   if (diffMins < 60) return `${diffMins}m ago`;
   if (diffHours < 24) return `${diffHours}h ago`;
   if (diffDays < 7) return `${diffDays}d ago`;
-  
+
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
@@ -53,7 +60,7 @@ function groupChatsByDate(chats) {
 
   chats.forEach(chat => {
     const chatDate = new Date(chat.updatedAt);
-    
+
     if (chatDate >= todayStart) {
       groups.today.push(chat);
     } else if (chatDate >= yesterdayStart) {
@@ -70,20 +77,33 @@ function groupChatsByDate(chats) {
   return groups;
 }
 
-function ChatHistorySidebar({ onNewChat, onChatLoaded, loading }) {
-  const { 
-    chatList, 
-    currentChatId, 
-    loadChat, 
-    deleteChat, 
-    isSidebarCollapsed, 
+function ChatHistorySidebar({
+  onNewChat,
+  onChatLoaded,
+  loading,
+  onCreateProject,
+  onEditProject,
+  onOpenProjectKnowledge
+}) {
+  const {
+    chatList,
+    currentChatId,
+    loadChat,
+    deleteChat,
+    isSidebarCollapsed,
     toggleSidebar,
-    isLoadingChats 
+    isLoadingChats,
+    projects,
+    currentProject,
+    currentProjectId,
+    selectProject,
+    deleteProject
   } = useChat();
-  
-  const [hoveredChatId, setHoveredChatId] = useState(null);
-  const [menuOpenChatId, setMenuOpenChatId] = useState(null);
-  const [deletingChatId, setDeletingChatId] = useState(null);
+
+  const [hoveredId, setHoveredId] = useState(null);
+  // Open ⋯ menu: { type: 'chat' | 'project', id }
+  const [openMenu, setOpenMenu] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const menuButtonRefs = useRef({});
 
@@ -98,7 +118,7 @@ function ChatHistorySidebar({ onNewChat, onChatLoaded, loading }) {
   // Handle mouse move during resize
   const handleMouseMove = useCallback((e) => {
     if (!isResizing) return;
-    
+
     const newWidth = e.clientX;
     const clampedWidth = Math.min(Math.max(newWidth, MIN_SIDEBAR_WIDTH), MAX_SIDEBAR_WIDTH);
     setSidebarWidth(clampedWidth);
@@ -150,33 +170,64 @@ function ChatHistorySidebar({ onNewChat, onChatLoaded, loading }) {
     }
   };
 
-  const handleDeleteChat = async (e, chatId) => {
-    e.stopPropagation();
-    setDeletingChatId(chatId);
-    await deleteChat(chatId);
-    setDeletingChatId(null);
-    setMenuOpenChatId(null);
+  const handleProjectClick = (projectId) => {
+    if (loading) return;
+    if (projectId === currentProjectId) return;
+    selectProject(projectId);
   };
 
-  const handleMenuToggle = (e, chatId) => {
+  const handleLeaveProject = () => {
+    if (loading) return;
+    selectProject(null);
+  };
+
+  const handleDeleteChat = async (e, chatId) => {
     e.stopPropagation();
-    if (menuOpenChatId === chatId) {
-      setMenuOpenChatId(null);
+    setDeletingId(chatId);
+    await deleteChat(chatId);
+    setDeletingId(null);
+    setOpenMenu(null);
+  };
+
+  const handleDeleteProject = async (e, project) => {
+    e.stopPropagation();
+    setOpenMenu(null);
+    const chatCount = chatList.filter(c => c.projectId === project.id).length;
+    const what = chatCount
+      ? `"${project.name}" and its ${chatCount} chat${chatCount === 1 ? '' : 's'}`
+      : `"${project.name}"`;
+    if (!window.confirm(`Delete ${what}? This cannot be undone.`)) return;
+    setDeletingId(project.id);
+    await deleteProject(project.id);
+    setDeletingId(null);
+  };
+
+  const handleMenuToggle = (e, type, id) => {
+    e.stopPropagation();
+    if (openMenu && openMenu.type === type && openMenu.id === id) {
+      setOpenMenu(null);
     } else {
       // Calculate position for fixed dropdown
-      const button = menuButtonRefs.current[chatId];
+      const button = menuButtonRefs.current[`${type}:${id}`];
       if (button) {
         const rect = button.getBoundingClientRect();
         setMenuPosition({
           top: rect.bottom + 4,
-          left: rect.right - 120, // 120px is the min-width of dropdown
+          left: rect.right - 140, // 140px is the min-width of dropdown
         });
       }
-      setMenuOpenChatId(chatId);
+      setOpenMenu({ type, id });
     }
   };
 
-  const groupedChats = groupChatsByDate(chatList);
+  const isMenuOpen = (type, id) => !!openMenu && openMenu.type === type && openMenu.id === id;
+
+  // Project chats live under their project; the main list shows the rest
+  const visibleChats = useMemo(
+    () => chatList.filter(chat => (currentProjectId ? chat.projectId === currentProjectId : !chat.projectId)),
+    [chatList, currentProjectId]
+  );
+  const groupedChats = groupChatsByDate(visibleChats);
 
   const renderChatGroup = (title, chats) => {
     if (chats.length === 0) return null;
@@ -198,17 +249,18 @@ function ChatHistorySidebar({ onNewChat, onChatLoaded, loading }) {
                 ${currentChatId === chat.id
                   ? 'bg-secondary text-foreground'
                   : 'hover:bg-muted/50 text-foreground/80 hover:text-foreground'}
-                ${deletingChatId === chat.id ? 'opacity-50' : ''}
+                ${deletingId === chat.id ? 'opacity-50' : ''}
               `}
               onClick={() => handleChatClick(chat.id)}
-              onMouseEnter={() => setHoveredChatId(chat.id)}
+              onMouseEnter={() => setHoveredId(chat.id)}
               onMouseLeave={() => {
-                setHoveredChatId(null);
-                if (menuOpenChatId === chat.id) setMenuOpenChatId(null);
+                setHoveredId(null);
+                if (isMenuOpen('chat', chat.id)) setOpenMenu(null);
               }}
+              title={isSidebarCollapsed ? (chat.title || 'New Chat') : undefined}
             >
               <MessageSquare className="h-4 w-4 flex-shrink-0" />
-              
+
               {!isSidebarCollapsed && (
                 <>
                   <div className="flex-1 min-w-0">
@@ -224,26 +276,26 @@ function ChatHistorySidebar({ onNewChat, onChatLoaded, loading }) {
                   </div>
 
                   {/* Action menu */}
-                  {(hoveredChatId === chat.id || menuOpenChatId === chat.id) && (
+                  {(hoveredId === chat.id || isMenuOpen('chat', chat.id)) && (
                     <div className="absolute right-2 top-1/2 -translate-y-1/2">
                       <button
-                        ref={(el) => menuButtonRefs.current[chat.id] = el}
-                        onClick={(e) => handleMenuToggle(e, chat.id)}
+                        ref={(el) => menuButtonRefs.current[`chat:${chat.id}`] = el}
+                        onClick={(e) => handleMenuToggle(e, 'chat', chat.id)}
                         className="p-1 rounded hover:bg-accent/60 transition-colors"
                       >
                         <MoreVertical className="h-4 w-4" />
                       </button>
                     </div>
                   )}
-                  
+
                   {/* Dropdown menu - rendered with fixed position to escape overflow clipping */}
-                  {menuOpenChatId === chat.id && (
-                    <div 
-                      className="fixed py-1 glass-card rounded-md min-w-[120px]"
-                      style={{ 
-                        top: menuPosition.top, 
+                  {isMenuOpen('chat', chat.id) && (
+                    <div
+                      className="fixed py-1 glass-card rounded-md min-w-[140px]"
+                      style={{
+                        top: menuPosition.top,
                         left: menuPosition.left,
-                        zIndex: 9999 
+                        zIndex: 9999
                       }}
                     >
                       <button
@@ -264,14 +316,170 @@ function ChatHistorySidebar({ onNewChat, onChatLoaded, loading }) {
     );
   };
 
+  const renderProjectItem = (project) => {
+    const fileCount = project.files?.length || 0;
+    const chatCount = chatList.filter(c => c.projectId === project.id).length;
+    return (
+      <div
+        key={project.id}
+        className={`
+          relative group flex items-center gap-2 px-3 py-2 cursor-pointer
+          rounded-lg mx-2 transition-colors duration-150
+          hover:bg-muted/50 text-foreground/80 hover:text-foreground
+          ${deletingId === project.id ? 'opacity-50' : ''}
+        `}
+        onClick={() => handleProjectClick(project.id)}
+        onMouseEnter={() => setHoveredId(project.id)}
+        onMouseLeave={() => {
+          setHoveredId(null);
+          if (isMenuOpen('project', project.id)) setOpenMenu(null);
+        }}
+        title={isSidebarCollapsed ? project.name : undefined}
+      >
+        <Folder className="h-4 w-4 flex-shrink-0 text-primary" />
+
+        {!isSidebarCollapsed && (
+          <>
+            <div className="flex-1 min-w-0">
+              <span className="block truncate text-sm font-medium">{project.name}</span>
+              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                <span>{chatCount} chat{chatCount === 1 ? '' : 's'}</span>
+                <span>·</span>
+                <span>{fileCount} file{fileCount === 1 ? '' : 's'}</span>
+              </div>
+            </div>
+
+            {(hoveredId === project.id || isMenuOpen('project', project.id)) && (
+              <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                <button
+                  ref={(el) => menuButtonRefs.current[`project:${project.id}`] = el}
+                  onClick={(e) => handleMenuToggle(e, 'project', project.id)}
+                  className="p-1 rounded hover:bg-accent/60 transition-colors"
+                >
+                  <MoreVertical className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+
+            {isMenuOpen('project', project.id) && (
+              <div
+                className="fixed py-1 glass-card rounded-md min-w-[140px]"
+                style={{ top: menuPosition.top, left: menuPosition.left, zIndex: 9999 }}
+              >
+                <button
+                  onClick={(e) => { e.stopPropagation(); setOpenMenu(null); onEditProject?.(project); }}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-accent/60 transition-colors"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  Edit
+                </button>
+                <button
+                  onClick={(e) => handleDeleteProject(e, project)}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10 transition-colors"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Delete
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    );
+  };
+
+  const renderProjectsSection = () => (
+    <div className="mb-4">
+      {!isSidebarCollapsed ? (
+        <div className="flex items-center justify-between pl-3 pr-2 py-1">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Projects</span>
+          <button
+            onClick={onCreateProject}
+            className="p-1 rounded hover:bg-accent/60 transition-colors text-muted-foreground hover:text-foreground"
+            title="New project"
+          >
+            <FolderPlus className="h-4 w-4" />
+          </button>
+        </div>
+      ) : (
+        <div className="flex justify-center py-1">
+          <button
+            onClick={onCreateProject}
+            className="p-1.5 rounded hover:bg-accent/60 transition-colors text-muted-foreground hover:text-foreground"
+            title="New project"
+          >
+            <FolderPlus className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+      {projects.length === 0 ? (
+        !isSidebarCollapsed && (
+          <button
+            onClick={onCreateProject}
+            className="mx-2 w-[calc(100%-1rem)] text-left px-3 py-2 rounded-lg border border-dashed border-border text-xs text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors"
+          >
+            Create a project to give chats shared instructions and files
+          </button>
+        )
+      ) : (
+        <div className="space-y-0.5">
+          {projects.map(renderProjectItem)}
+        </div>
+      )}
+    </div>
+  );
+
+  const renderProjectHeaderCard = () => {
+    if (!currentProject || isSidebarCollapsed) return null;
+    const fileCount = currentProject.files?.length || 0;
+    const hasInstructions = !!(currentProject.instructions || '').trim();
+    return (
+      <div className="mx-2 mb-3 rounded-lg border border-border/60 bg-background/40 px-3 py-2.5">
+        {currentProject.description && (
+          <p className="text-xs text-muted-foreground line-clamp-2 mb-2">{currentProject.description}</p>
+        )}
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <BookOpen className="h-3 w-3" />
+            {hasInstructions ? 'Instructions set' : 'No instructions'}
+          </span>
+          <span className="flex items-center gap-1">
+            <FileText className="h-3 w-3" />
+            {fileCount} file{fileCount === 1 ? '' : 's'}
+          </span>
+        </div>
+        <div className="flex items-center gap-1 mt-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-xs flex-1"
+            onClick={() => onOpenProjectKnowledge?.(currentProject)}
+          >
+            <BookOpen className="h-3.5 w-3.5 mr-1" />
+            Knowledge
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => onEditProject?.(currentProject)}
+            title="Edit project"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <div 
+    <div
       ref={sidebarRef}
       className={`
         flex flex-col h-full glass relative
         ${isResizing ? '' : 'transition-all duration-300 ease-in-out'}
       `}
-      style={{ 
+      style={{
         width: isSidebarCollapsed ? COLLAPSED_WIDTH : sidebarWidth,
         minWidth: isSidebarCollapsed ? COLLAPSED_WIDTH : MIN_SIDEBAR_WIDTH,
         maxWidth: isSidebarCollapsed ? COLLAPSED_WIDTH : MAX_SIDEBAR_WIDTH
@@ -291,17 +499,46 @@ function ChatHistorySidebar({ onNewChat, onChatLoaded, loading }) {
         />
       )}
       {/* Header */}
-      <div className="flex items-center justify-between p-3 border-b border-border">
+      <div className="flex items-center justify-between p-3 border-b border-border gap-1">
         {!isSidebarCollapsed && (
-          <h2 className="font-semibold text-sm">Chats</h2>
+          currentProject ? (
+            <div className="flex items-center gap-1 min-w-0 flex-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleLeaveProject}
+                className="h-7 w-7 flex-shrink-0"
+                title="Back to all chats"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+              <FolderOpen className="h-4 w-4 text-primary flex-shrink-0" />
+              <h2 className="font-semibold text-sm truncate" title={currentProject.name}>
+                {currentProject.name}
+              </h2>
+            </div>
+          ) : (
+            <h2 className="font-semibold text-sm">Chats</h2>
+          )
         )}
-        <div className={`flex items-center gap-1 ${isSidebarCollapsed ? 'w-full justify-center' : ''}`}>
+        <div className={`flex items-center gap-1 ${isSidebarCollapsed ? 'w-full justify-center' : 'flex-shrink-0'}`}>
+          {isSidebarCollapsed && currentProject && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleLeaveProject}
+              className="h-8 w-8"
+              title={`Leave ${currentProject.name}`}
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="icon"
             onClick={onNewChat}
             className="h-8 w-8"
-            title="New Chat"
+            title={currentProject ? `New chat in ${currentProject.name}` : 'New Chat'}
           >
             <Plus className="h-4 w-4" />
           </Button>
@@ -327,25 +564,55 @@ function ChatHistorySidebar({ onNewChat, onChatLoaded, loading }) {
           <div className="flex items-center justify-center py-8">
             <div className="loading-spinner" />
           </div>
-        ) : chatList.length === 0 ? (
-          <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-            {isSidebarCollapsed ? (
-              <MessageSquare className="h-6 w-6 mx-auto opacity-50" />
+        ) : currentProject ? (
+          <>
+            {renderProjectHeaderCard()}
+            {visibleChats.length === 0 ? (
+              <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                {isSidebarCollapsed ? (
+                  <MessageSquare className="h-6 w-6 mx-auto opacity-50" />
+                ) : (
+                  <>
+                    <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p>No chats in this project yet</p>
+                    <p className="text-xs mt-1">Send a message to start one</p>
+                  </>
+                )}
+              </div>
             ) : (
               <>
-                <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p>No chats yet</p>
-                <p className="text-xs mt-1">Start a new conversation</p>
+                {renderChatGroup('Today', groupedChats.today)}
+                {renderChatGroup('Yesterday', groupedChats.yesterday)}
+                {renderChatGroup('This Week', groupedChats.thisWeek)}
+                {renderChatGroup('This Month', groupedChats.thisMonth)}
+                {renderChatGroup('Older', groupedChats.older)}
               </>
             )}
-          </div>
+          </>
         ) : (
           <>
-            {renderChatGroup('Today', groupedChats.today)}
-            {renderChatGroup('Yesterday', groupedChats.yesterday)}
-            {renderChatGroup('This Week', groupedChats.thisWeek)}
-            {renderChatGroup('This Month', groupedChats.thisMonth)}
-            {renderChatGroup('Older', groupedChats.older)}
+            {renderProjectsSection()}
+            {visibleChats.length === 0 ? (
+              <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+                {isSidebarCollapsed ? (
+                  <MessageSquare className="h-6 w-6 mx-auto opacity-50" />
+                ) : (
+                  <>
+                    <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p>No chats yet</p>
+                    <p className="text-xs mt-1">Start a new conversation</p>
+                  </>
+                )}
+              </div>
+            ) : (
+              <>
+                {renderChatGroup('Today', groupedChats.today)}
+                {renderChatGroup('Yesterday', groupedChats.yesterday)}
+                {renderChatGroup('This Week', groupedChats.thisWeek)}
+                {renderChatGroup('This Month', groupedChats.thisMonth)}
+                {renderChatGroup('Older', groupedChats.older)}
+              </>
+            )}
           </>
         )}
       </div>
@@ -354,4 +621,3 @@ function ChatHistorySidebar({ onNewChat, onChatLoaded, loading }) {
 }
 
 export default ChatHistorySidebar;
-
