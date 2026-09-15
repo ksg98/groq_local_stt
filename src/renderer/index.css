@@ -275,3 +275,87 @@ select#model-select {
 }
 
  
+/* --- Reading & focus ------------------------------------------------------
+   Unlayered on purpose: these must win over Tailwind's utility classes. */
+
+@font-face {
+  font-family: 'Atkinson Hyperlegible';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./assets/fonts/AtkinsonHyperlegible-Regular.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Atkinson Hyperlegible';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./assets/fonts/AtkinsonHyperlegible-Bold.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Atkinson Hyperlegible';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./assets/fonts/AtkinsonHyperlegible-Italic.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Atkinson Hyperlegible';
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./assets/fonts/AtkinsonHyperlegible-BoldItalic.woff2') format('woff2');
+}
+
+/* Follow-along while reading aloud: the sentence being spoken, and the word
+   inside it. Painted with the CSS Custom Highlight API, so nothing in the
+   rendered markdown moves. */
+::highlight(tts-sentence) {
+  background-color: hsl(var(--primary) / 0.13);
+  color: hsl(var(--foreground));
+}
+::highlight(tts-word) {
+  background-color: hsl(var(--primary) / 0.42);
+  color: hsl(var(--foreground));
+}
+.dark ::highlight(tts-sentence) {
+  background-color: hsl(var(--primary) / 0.22);
+}
+.dark ::highlight(tts-word) {
+  background-color: hsl(var(--primary) / 0.55);
+}
+
+/* Everything but the spoken sentence steps back */
+.reading-dim .markdown-content {
+  color: hsl(var(--muted-foreground));
+  transition: color 200ms ease;
+}
+
+/* Text presentation, toggled by classes on <html> (see useReadingPrefs) */
+html.reading-font-legible .markdown-content,
+html.reading-font-legible .message-content-wrapper {
+  font-family: 'Atkinson Hyperlegible', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+html.reading-size-lg .message-content-wrapper,
+html.reading-size-lg .markdown-content,
+html.reading-size-lg .markdown-content :is(p, li, td, th, .text-sm) {
+  font-size: 1rem;
+}
+html.reading-size-xl .message-content-wrapper,
+html.reading-size-xl .markdown-content,
+html.reading-size-xl .markdown-content :is(p, li, td, th, .text-sm) {
+  font-size: 1.125rem;
+}
+html.reading-comfort .markdown-content {
+  line-height: 1.75;
+  max-width: 72ch;
+}
+html.reading-comfort .markdown-content p {
+  margin-bottom: 1rem;
+}
+html.reading-comfort .markdown-content li {
+  margin-bottom: 0.5rem;
+}
+.markdown-content b.bw {
+  font-weight: 700;
+}

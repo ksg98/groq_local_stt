@@ -3,7 +3,7 @@ import { cn } from '../lib/utils';
 
 // Speaking-rate picker. A menu rather than a cycle button, so any rate is one
 // click away instead of four.
-function SpeedControl({ speed = 1, steps = [0.75, 1, 1.25, 1.5, 1.75, 2], onChange, className }) {
+function SpeedControl({ speed = 1, steps = [0.75, 1, 1.25, 1.5, 1.75, 2], onChange, className, placement = 'up' }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -42,7 +42,10 @@ function SpeedControl({ speed = 1, steps = [0.75, 1, 1.25, 1.5, 1.75, 2], onChan
       {open && (
         <div
           role="menu"
-          className="absolute bottom-full right-0 mb-2 z-50 glass-card rounded-lg p-1 shadow-lg min-w-[4.25rem]"
+          className={cn(
+            'absolute right-0 z-50 glass-card rounded-lg p-1 shadow-lg min-w-[4.25rem]',
+            placement === 'down' ? 'top-full mt-2' : 'bottom-full mb-2'
+          )}
         >
           {steps.map((step) => (
             <button

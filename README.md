@@ -27,6 +27,8 @@ xattr -c /Applications/Groq\ Desktop.app
 - Chat interface with image support
 - Local MCP servers
 - Projects: shared instructions and reference files (text, code, PDF, Word) for a group of chats, with an option to override the custom system prompt from Settings
+- Read aloud with follow-along: the sentence and word being spoken are highlighted as you listen (exact word timing with local Kokoro, estimated with OpenAI voices), the view follows the voice, and you can click any sentence to continue from it or skip with the arrow keys
+- Reading & focus settings: read every reply aloud as it streams, dim everything but the spoken sentence, larger text, comfortable spacing, a legible font (Atkinson Hyperlegible) and bold word starts
 
 ## Prerequisites
 

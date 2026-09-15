@@ -8,7 +8,8 @@ import ChatHistorySidebar from './components/ChatHistorySidebar';
 import ScreenSourcePicker from './components/ScreenSourcePicker';
 import { ProjectKnowledgePanel, ProjectModal, ProjectKnowledgeModal } from './components/ProjectPanel';
 import { useChat } from './context/ChatContext'; // Import useChat hook
-import { useVoiceAgent, SPEED_STEPS } from './hooks/useVoiceAgent';
+import { useVoiceAgent, SPEED_STEPS, resolveToken } from './hooks/useVoiceAgent';
+import { useReadingPrefs } from './hooks/useReadingPrefs';
 import { buildFrameParts, mergeFinalFrame, pruneHistoryImages } from './lib/frameBank';
 import { useMediaCapture } from './hooks/useMediaCapture';
 // Import shared model definitions - REMOVED
@@ -150,6 +151,10 @@ function App() {
   // the streaming callbacks in executeChatTurn read them through these refs.
   const voiceAgentRef = useRef(null);
   const captureRef = useRef(null);
+  // Index of the streaming assistant placeholder, for auto-read to follow
+  const placeholderIndexRef = useRef(-1);
+  // Reading & focus preferences (follow-along, auto-read, text presentation)
+  const readingPrefs = useReadingPrefs();
   // --- End Voice Agent / Capture refs ---
 
   // Rewind: drop everything after a message, without resending anything.
@@ -800,7 +805,12 @@ function App() {
             isStreaming: true,
             reasoningSummaries: []
         };
-        setMessages(prev => [...prev, assistantPlaceholder]);
+        setMessages(prev => {
+            placeholderIndexRef.current = prev.length;
+            return [...prev, assistantPlaceholder];
+        });
+        // Auto-read: speak this reply as it streams in, following along on screen
+        voiceAgentRef.current?.onAssistantTurnStart(() => placeholderIndexRef.current);
 
         // Start streaming chat
         // Old screenshots leave the payload here; the chat on screen keeps them
@@ -1410,6 +1420,7 @@ function App() {
         ? captureRef.current.captureFrameWithSignature({ maxWidth: 1024, quality: 0.6 })
         : null,
     frameBudgetRef,
+    autoRead: readingPrefs.ttsAutoRead,
   });
   voiceAgentRef.current = voiceAgent;
 
@@ -1425,10 +1436,17 @@ function App() {
       stop: voiceAgent.stopSpeech,
       speedSteps: SPEED_STEPS,
       setSpeed: voiceAgent.setSpeed,
+      // A reply read while streaming carries a token that resolves to its
+      // message index once it has rendered
       tokenState: (token) =>
-        voiceAgent.playback.token === token ? voiceAgent.playback.state : 'idle',
+        resolveToken(voiceAgent.playback.token) === token ? voiceAgent.playback.state : 'idle',
+      // Follow-along: where the voice is, jumping, and the reading preferences
+      cursorStore: voiceAgent.readCursorStore,
+      jumpTo: voiceAgent.jumpTo,
+      skip: voiceAgent.skipSentence,
+      prefs: readingPrefs,
     }),
-    [voiceAgent.supported, voiceAgent.speed, voiceAgent.readAloud, voiceAgent.pauseSpeech, voiceAgent.resumeSpeech, voiceAgent.stopSpeech, voiceAgent.setSpeed, voiceAgent.playback]
+    [voiceAgent.supported, voiceAgent.speed, voiceAgent.readAloud, voiceAgent.pauseSpeech, voiceAgent.resumeSpeech, voiceAgent.stopSpeech, voiceAgent.setSpeed, voiceAgent.playback, voiceAgent.readCursorStore, voiceAgent.jumpTo, voiceAgent.skipSentence, readingPrefs]
   );
 
   // Screenshare/camera are only offered during voice sessions — stop any

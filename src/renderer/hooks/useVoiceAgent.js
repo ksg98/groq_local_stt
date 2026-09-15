@@ -3,6 +3,7 @@ import { MicVAD, utils } from '@ricky0123/vad-web';
 import { SentenceChunker } from '../lib/sentenceChunker';
 import { TtsPlayer } from '../lib/ttsPlayer';
 import { FrameBank } from '../lib/frameBank';
+import { splitWords, wordTimings, wordIndexAt, estimateDuration } from '../lib/speechTiming';
 
 // Static assets copied by vite-plugin-static-copy (dev server and dist build);
 // in the packaged app they are served through the app:// scheme.
@@ -15,6 +16,31 @@ export const SPEED_STEPS = [0.75, 1, 1.25, 1.5, 1.75, 2];
 // How many sentences may be in synthesis at once during read-aloud. Enough to
 // stay gapless, few enough that a speed change is heard within a sentence or two.
 const READ_LOOKAHEAD = 2;
+
+// A read-aloud token names what is being read: a message index, 'selection',
+// or a getter for a message whose index is only known once it renders (a reply
+// read while it streams in).
+export function resolveToken(token) {
+  return typeof token === 'function' ? token() : token;
+}
+
+// Where the voice is inside a read, published outside React state so only the
+// message being read re-renders as the word moves.
+function createCursorStore() {
+  let value = null;
+  const listeners = new Set();
+  return {
+    get: () => value,
+    set: (next) => {
+      value = next;
+      listeners.forEach((listener) => listener());
+    },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+}
 
 // Split arbitrary text into speakable sentences using the same rules the
 // streaming path uses, so code blocks and markdown are stripped identically.
@@ -36,6 +62,7 @@ export function sentencesForSpeech(text) {
  * @param {() => ({url: string, sig: Uint8Array}|null)} [params.captureHeldFrame]
  *        grabs the current screen/camera frame; called at the end of each utterance while the floor is held
  * @param {{current: number}} [params.frameBudgetRef]  max frames per held turn, including the send-time frame
+ * @param {boolean} [params.autoRead]                   read every reply aloud as it streams, without a voice session
  * @param {() => void} params.onStopGeneration          cancels the in-flight chat stream (barge-in)
  * @param {{current: boolean}} params.loadingRef        ref mirroring the chat `loading` state
  * @param {(message: string) => void} [params.onError]
@@ -47,6 +74,7 @@ export function useVoiceAgent({
   onError,
   captureHeldFrame,
   frameBudgetRef,
+  autoRead = false,
 }) {
   const [supported, setSupported] = useState(false);
   const [active, setActive] = useState(false);
@@ -81,6 +109,17 @@ export function useVoiceAgent({
   const frameBankRef = useRef(null);
   const holdStartRef = useRef(0);
   const speedRef = useRef(DEFAULT_SPEED);
+  // Read-aloud session: the sentences being read and where the voice is
+  const readSessionRef = useRef(null); // { token, getToken, sentences, streaming, starting }
+  const segmentInfoRef = useRef(new Map()); // sentence id -> { index, tokens, words, timings, timingKey }
+  const cursorTimerRef = useRef(null);
+  const cursorRef = useRef(null);
+  const cursorStoreRef = useRef(null);
+  if (!cursorStoreRef.current) cursorStoreRef.current = createCursorStore();
+  const autoReadRef = useRef(!!autoRead);
+  autoReadRef.current = !!autoRead;
+  const autoChunkerRef = useRef(null); // splits a streaming reply into sentences for auto-read
+  const jumpSeqRef = useRef(0);
   const readingRef = useRef(null); // token of the text being read aloud
   const pendingReadIdsRef = useRef(new Set()); // sent for synthesis, not yet done
   const readQueueRef = useRef([]); // sentences not yet sent
@@ -201,6 +240,8 @@ export function useVoiceAgent({
   // Assigned below; used by the player callback created above.
   const deriveStateRef = useRef(null);
   const finishReadIfDoneRef = useRef(null);
+  const endReadSessionRef = useRef(null);
+  const tickCursorRef = useRef(null);
 
   const deriveState = useCallback(() => {
     if (!activeRef.current) return 'idle';
@@ -235,9 +276,21 @@ export function useVoiceAgent({
       if (id < discardBelowRef.current) return;
       if (!activeRef.current && !readingRef.current) return;
       audioSeenRef.current.add(id);
-      ensurePlayer().enqueue(chunk, sr);
+      ensurePlayer().enqueue(chunk, sr, id);
+    });
+    // Word timestamps arrive just before the audio they describe (Kokoro)
+    const offWords = window.electron?.tts?.onWords?.(({ id, offset, words }) => {
+      const info = segmentInfoRef.current.get(id);
+      if (!info) return;
+      const base = Number(offset) || 0;
+      for (const entry of words || []) {
+        if (!Array.isArray(entry)) continue;
+        info.tokens.push({ text: entry[0], start: Number(entry[1]) + base, end: Number(entry[2]) + base });
+      }
+      info.timings = null;
     });
     const offDone = window.electron?.tts?.onSpeakDone?.(({ id }) => {
+      playerRef.current?.markDone(id);
       if (!pendingReadIdsRef.current.delete(id)) return;
       const entry = sentenceByIdRef.current.get(id);
       sentenceByIdRef.current.delete(id);
@@ -246,14 +299,31 @@ export function useVoiceAgent({
       // no audio behind it. Without this the sentence would be silently
       // skipped while the rest of the message carried on.
       if (!madeSound && entry && !entry.retried && readingRef.current) {
-        readQueueRef.current.unshift({ text: entry.text, retried: true });
+        readQueueRef.current.unshift({ text: entry.text, index: entry.index, retried: true });
+      }
+      pumpReadQueueRef.current?.();
+      finishReadIfDoneRef.current?.();
+    });
+    // A sentence the engine could not synthesise reports an error instead of
+    // done. Treat it like a cancelled one: retry once, then move on, so a
+    // read never wedges behind it.
+    const offError = window.electron?.tts?.onError?.(({ id, message }) => {
+      if (id == null || !pendingReadIdsRef.current.delete(id)) return;
+      console.warn('[VoiceAgent] Sentence failed to synthesise:', message);
+      const entry = sentenceByIdRef.current.get(id);
+      sentenceByIdRef.current.delete(id);
+      audioSeenRef.current.delete(id);
+      if (entry && !entry.retried && readingRef.current) {
+        readQueueRef.current.unshift({ text: entry.text, index: entry.index, retried: true });
       }
       pumpReadQueueRef.current?.();
       finishReadIfDoneRef.current?.();
     });
     return () => {
       offChunk?.();
+      offWords?.();
       offDone?.();
+      offError?.();
     };
   }, [ensurePlayer]);
 
@@ -265,21 +335,128 @@ export function useVoiceAgent({
     if (readQueueRef.current.length > 0) return;
     if (pendingReadIdsRef.current.size > 0) return;
     if (playerRef.current?.isSpeaking) return;
+    // A reply still streaming in has more sentences on the way
+    if (readSessionRef.current?.streaming || readSessionRef.current?.starting) return;
     readingRef.current = null;
+    endReadSessionRef.current?.();
     setPlayback({ token: null, state: 'idle' });
   }, []);
   finishReadIfDoneRef.current = finishReadIfDone;
+
+  // --- Follow-along cursor ---------------------------------------------------
+  // Polls the player for the sentence and word being sounded and publishes
+  // { token, index, total, sentences, wordStart, wordEnd, streaming, secondsLeft }.
+
+  const stopCursorLoop = useCallback(() => {
+    if (cursorTimerRef.current) {
+      clearInterval(cursorTimerRef.current);
+      cursorTimerRef.current = null;
+    }
+  }, []);
+
+  const endReadSession = useCallback(() => {
+    stopCursorLoop();
+    readSessionRef.current = null;
+    segmentInfoRef.current.clear();
+    autoChunkerRef.current = null;
+    if (cursorRef.current) {
+      cursorRef.current = null;
+      cursorStoreRef.current.set(null);
+    }
+  }, [stopCursorLoop]);
+  endReadSessionRef.current = endReadSession;
+
+  const beginReadSession = useCallback(
+    (session) => {
+      stopCursorLoop();
+      segmentInfoRef.current.clear();
+      cursorRef.current = null;
+      cursorStoreRef.current.set(null);
+      readSessionRef.current = { token: null, getToken: null, streaming: false, starting: false, ...session };
+      cursorTimerRef.current = setInterval(() => tickCursorRef.current?.(), 50);
+    },
+    [stopCursorLoop]
+  );
+
+  // Audio still scheduled, plus an estimate for sentences not yet synthesised
+  const secondsLeft = useCallback((session) => {
+    const player = playerRef.current;
+    let left = player?.remaining() || 0;
+    for (const item of readQueueRef.current) left += estimateDuration(item.text, speedRef.current);
+    for (const id of pendingReadIdsRef.current) {
+      const info = segmentInfoRef.current.get(id);
+      if (info && !player?.segments.has(id) && session.sentences[info.index] != null) {
+        left += estimateDuration(session.sentences[info.index], speedRef.current);
+      }
+    }
+    return left;
+  }, []);
+
+  const tickCursor = useCallback(() => {
+    const session = readSessionRef.current;
+    const player = playerRef.current;
+    if (!session || !player) return;
+    const pos = player.position();
+    const prev = cursorRef.current;
+    let next = prev;
+    if (pos) {
+      const info = segmentInfoRef.current.get(pos.id);
+      const sentence = info ? session.sentences[info.index] : null;
+      if (info && sentence != null) {
+        if (!info.words) info.words = splitWords(sentence);
+        // Until every chunk has arrived the sentence may be longer than what
+        // has been heard so far
+        const duration = pos.complete
+          ? pos.duration
+          : Math.max(pos.duration, estimateDuration(sentence, speedRef.current));
+        const timingKey = `${info.tokens.length}:${duration.toFixed(2)}`;
+        if (!info.timings || info.timingKey !== timingKey) {
+          info.timings = wordTimings(sentence, info.words, info.tokens, duration);
+          info.timingKey = timingKey;
+        }
+        const wordIndex = pos.ended ? -1 : wordIndexAt(info.timings, pos.offset);
+        const word = wordIndex >= 0 ? info.words[wordIndex] : null;
+        next = {
+          token: session.token ?? (session.getToken ? session.getToken() : null),
+          index: info.index,
+          total: session.sentences.length,
+          sentences: session.sentences,
+          wordStart: word ? word.start : -1,
+          wordEnd: word ? word.end : -1,
+          streaming: !!session.streaming,
+          secondsLeft: Math.round(secondsLeft(session)),
+        };
+      }
+    }
+    if (!next) return;
+    if (
+      prev &&
+      prev.token === next.token &&
+      prev.index === next.index &&
+      prev.wordStart === next.wordStart &&
+      prev.total === next.total &&
+      prev.streaming === next.streaming &&
+      prev.secondsLeft === next.secondsLeft
+    ) {
+      return;
+    }
+    cursorRef.current = next;
+    cursorStoreRef.current.set(next);
+  }, [secondsLeft]);
+  tickCursorRef.current = tickCursor;
 
   // Each sentence reads the speed at the moment it is sent, so changing it
   // mid-read takes effect on the next one out of the queue rather than after
   // a stop and restart.
   const pumpReadQueue = useCallback(() => {
     if (!readingRef.current) return;
+    if (readSessionRef.current?.starting) return; // engine not up yet
     while (readQueueRef.current.length && pendingReadIdsRef.current.size < READ_LOOKAHEAD) {
       const item = readQueueRef.current.shift();
       const id = ++speakSeqRef.current;
       pendingReadIdsRef.current.add(id);
       sentenceByIdRef.current.set(id, item);
+      if (item.index != null) segmentInfoRef.current.set(id, { index: item.index, tokens: [] });
       const abandon = () => {
         // No 'done' is coming for this one, so release its slot by hand
         // rather than leaving the queue wedged behind it.
@@ -411,6 +588,7 @@ export function useVoiceAgent({
     sentenceByIdRef.current.clear();
     audioSeenRef.current.clear();
     readQueueRef.current = [];
+    endReadSessionRef.current?.();
     setPlayback({ token: null, state: 'idle' });
     unsubsRef.current.forEach((unsub) => {
       try {
@@ -633,6 +811,7 @@ export function useVoiceAgent({
     readQueueRef.current = [];
     readingRef.current = null;
     chunkerRef.current?.reset();
+    endReadSessionRef.current?.();
     playerRef.current?.stopAll();
     setPlayback({ token: null, state: 'idle' });
     return window.electron.tts?.cancel().catch(() => {}) ?? Promise.resolve();
@@ -662,11 +841,120 @@ export function useVoiceAgent({
         return;
       }
       if (readingRef.current !== token) return; // superseded while starting
-      readQueueRef.current = sentences.map((text) => ({ text, retried: false }));
+      beginReadSession({ token, sentences });
+      readQueueRef.current = sentences.map((text, index) => ({ text, index, retried: false }));
       pumpReadQueue();
     },
-    [ensurePlayer, pumpReadQueue, stopSpeech]
+    [beginReadSession, ensurePlayer, pumpReadQueue, stopSpeech]
   );
+
+  // Continue the current read from another sentence (click-to-jump, skip).
+  const jumpTo = useCallback(
+    async (token, index) => {
+      const session = readSessionRef.current;
+      if (!session || resolveToken(readingRef.current) !== token) return;
+      const total = session.sentences.length;
+      if (!total) return;
+      const target = Math.max(0, Math.min(total - 1, Math.round(index)));
+      const myJump = ++jumpSeqRef.current;
+      // Drop what is in flight but keep the session. The queue is refilled
+      // before the player stops, so the read does not count as finished.
+      discardBelowRef.current = speakSeqRef.current + 1;
+      pendingReadIdsRef.current.clear();
+      sentenceByIdRef.current.clear();
+      audioSeenRef.current.clear();
+      segmentInfoRef.current.clear();
+      readQueueRef.current = session.sentences
+        .slice(target)
+        .map((text, i) => ({ text, index: target + i, retried: false }));
+      playerRef.current?.stopAll();
+      cursorRef.current = {
+        token,
+        index: target,
+        total,
+        sentences: session.sentences,
+        wordStart: -1,
+        wordEnd: -1,
+        streaming: !!session.streaming,
+        secondsLeft: cursorRef.current?.secondsLeft ?? 0,
+      };
+      cursorStoreRef.current.set(cursorRef.current);
+      setPlayback({ token: readingRef.current, state: 'speaking' });
+      // Await the cancel so the new sentences queue behind it in the engine
+      await (window.electron.tts?.cancel().catch(() => {}) ?? Promise.resolve());
+      if (jumpSeqRef.current !== myJump || readSessionRef.current !== session) return;
+      pumpReadQueue();
+    },
+    [pumpReadQueue]
+  );
+
+  const skipSentence = useCallback(
+    (delta) => {
+      const cursor = cursorRef.current;
+      if (!cursor || !readSessionRef.current) return;
+      jumpTo(cursor.token, cursor.index + delta);
+    },
+    [jumpTo]
+  );
+
+  // Auto-read: a reply is spoken as it streams in, no voice session needed.
+  // Called when the assistant placeholder is added; `getToken` resolves to its
+  // message index once it has rendered.
+  const onAssistantTurnStart = useCallback(
+    (getToken) => {
+      if (activeRef.current || !autoReadRef.current) return;
+      // Whatever was playing stops now, and the new session opens at once so
+      // the first deltas are not lost while the engine starts.
+      const cancelled = stopSpeech();
+      readingRef.current = getToken;
+      setPlayback({ token: getToken, state: 'speaking' });
+      autoChunkerRef.current = new SentenceChunker();
+      beginReadSession({ getToken, sentences: [], streaming: true, starting: true });
+      const session = readSessionRef.current;
+      ensurePlayer().ensureContext();
+      (async () => {
+        await cancelled;
+        try {
+          const started = await window.electron.tts.start();
+          if (started && started.ok === false) throw new Error(started.error || 'Text-to-speech failed to start');
+        } catch (error) {
+          if (readSessionRef.current === session) stopSpeechRef.current?.();
+          callbacksRef.current.onError?.(error.message || 'Text-to-speech failed to start');
+          return;
+        }
+        if (readSessionRef.current !== session) return;
+        session.starting = false;
+        pumpReadQueue();
+        finishReadIfDoneRef.current?.();
+      })();
+    },
+    [beginReadSession, ensurePlayer, pumpReadQueue, stopSpeech]
+  );
+
+  // Keyboard while something is being read: arrows skip a sentence, space
+  // pauses. Ignored while typing.
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (!readSessionRef.current) return;
+      const target = event.target;
+      if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        skipSentence(1);
+      } else if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        skipSentence(-1);
+      } else if (event.key === ' ') {
+        event.preventDefault();
+        const player = playerRef.current;
+        if (player?.isPaused) player.resume();
+        else player?.pause();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [skipSentence]);
 
   const pauseSpeech = useCallback(() => ensurePlayer().pause(), [ensurePlayer]);
   const resumeSpeech = useCallback(() => ensurePlayer().resume(), [ensurePlayer]);
@@ -674,18 +962,44 @@ export function useVoiceAgent({
   // Called with every streamed content delta from the assistant
   const feedAssistantDelta = useCallback(
     (delta) => {
-      if (!activeRef.current || !delta) return;
-      chunkerRef.current?.feed(delta).forEach(speakSentence);
+      if (!delta) return;
+      if (activeRef.current) {
+        chunkerRef.current?.feed(delta).forEach(speakSentence);
+        return;
+      }
+      const session = readSessionRef.current;
+      if (!session?.streaming || !autoChunkerRef.current) return;
+      for (const text of autoChunkerRef.current.feed(delta)) {
+        readQueueRef.current.push({ text, index: session.sentences.length, retried: false });
+        session.sentences.push(text);
+      }
+      pumpReadQueue();
     },
-    [speakSentence]
+    [pumpReadQueue, speakSentence]
   );
 
   // Called when an assistant turn completes (speaks the trailing partial sentence)
   const flushAssistantTurn = useCallback(() => {
-    if (!activeRef.current) return;
-    const rest = chunkerRef.current?.flush();
-    if (rest) speakSentence(rest);
-  }, [speakSentence]);
+    if (activeRef.current) {
+      const rest = chunkerRef.current?.flush();
+      if (rest) speakSentence(rest);
+      return;
+    }
+    const session = readSessionRef.current;
+    if (!session?.streaming) return;
+    const rest = autoChunkerRef.current?.flush();
+    if (rest) {
+      readQueueRef.current.push({ text: rest, index: session.sentences.length, retried: false });
+      session.sentences.push(rest);
+    }
+    session.streaming = false;
+    if (!session.sentences.length) {
+      stopSpeechRef.current?.();
+      return;
+    }
+    pumpReadQueue();
+    finishReadIfDoneRef.current?.();
+  }, [pumpReadQueue, speakSentence]);
 
   // Called on stream error/cancel — drop any un-spoken text
   const cancelSpeech = useCallback(() => {
@@ -703,6 +1017,7 @@ export function useVoiceAgent({
   useEffect(() => {
     return () => {
       if (activeRef.current) stop();
+      endReadSessionRef.current?.();
       playerRef.current?.close();
       playerRef.current = null;
     };
@@ -726,6 +1041,10 @@ export function useVoiceAgent({
     pauseSpeech,
     resumeSpeech,
     stopSpeech,
+    readCursorStore: cursorStoreRef.current,
+    jumpTo,
+    skipSentence,
+    onAssistantTurnStart,
     speed,
     setSpeed,
     sidecarState,

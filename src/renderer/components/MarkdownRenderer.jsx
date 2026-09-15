@@ -8,6 +8,50 @@ import rehypeKatex from 'rehype-katex';
 import "katex/dist/katex.min.css";
 import MermaidDiagram from './MermaidDiagram';
 
+// Bold the first part of every word ("bionic" reading): the eye lands on the
+// bold anchor and completes the rest. Code, math and links' hrefs are left alone.
+const WORD_START_RE = /\p{L}[\p{L}\p{N}'’]*/gu;
+const BOLD_SKIP_TAGS = new Set(['code', 'pre', 'script', 'style', 'math', 'svg', 'kbd']);
+function rehypeBoldWordStarts() {
+  const splitText = (node) => {
+    const parts = [];
+    let last = 0;
+    let match;
+    WORD_START_RE.lastIndex = 0;
+    while ((match = WORD_START_RE.exec(node.value)) !== null) {
+      const word = match[0];
+      if (match.index > last) parts.push({ type: 'text', value: node.value.slice(last, match.index) });
+      const bold = word.length <= 3 ? 1 : Math.ceil(word.length * 0.4);
+      parts.push({ type: 'element', tagName: 'b', properties: { className: ['bw'] }, children: [{ type: 'text', value: word.slice(0, bold) }] });
+      if (bold < word.length) parts.push({ type: 'text', value: word.slice(bold) });
+      last = match.index + word.length;
+    }
+    if (!parts.length) return null;
+    if (last < node.value.length) parts.push({ type: 'text', value: node.value.slice(last) });
+    return parts;
+  };
+  const visit = (node) => {
+    if (!node.children) return;
+    if (node.type === 'element') {
+      const classes = node.properties?.className || [];
+      if (BOLD_SKIP_TAGS.has(node.tagName) || classes.some((c) => String(c).includes('katex'))) return;
+    }
+    const next = [];
+    for (const child of node.children) {
+      if (child.type === 'text') {
+        const parts = splitText(child);
+        if (parts) next.push(...parts);
+        else next.push(child);
+      } else {
+        visit(child);
+        next.push(child);
+      }
+    }
+    node.children = next;
+  };
+  return (tree) => visit(tree);
+}
+
 const newLineRegex = /\n/;
 const newLineAtTheEndRegex = /\n$/;
 const codeLanguageRegex = /language-(\w+)/;
@@ -178,7 +222,7 @@ const components = {
             );
           },
         }
-function MarkdownRenderer({ content, disableMath = false }) {
+function MarkdownRenderer({ content, disableMath = false, boldWordStarts = false }) {
   // Filter out reference lines like 【4†L24-L30】【4†L32-L35】
   content = content.replace(/【\d+†L\d+-L\d+】/g, '');
   
@@ -195,6 +239,7 @@ function MarkdownRenderer({ content, disableMath = false }) {
   // Configure remarkMath to only use $$ for display math, not single $ (to avoid conflicts with dollar amounts)
   const remarkPlugins = disableMath ? [remarkGfm] : [remarkGfm, [remarkMath, { singleDollarTextMath: false }]];
   const rehypePlugins = disableMath ? [] : [rehypeKatex];
+  if (boldWordStarts) rehypePlugins.push(rehypeBoldWordStarts);
 
   return (
     <div className="markdown-content text-sm">
@@ -209,4 +254,6 @@ function MarkdownRenderer({ content, disableMath = false }) {
   );
 }
 
-export default MarkdownRenderer; 
+// Memoised: the transcript re-renders a few times a second while a reply is
+// being read aloud, and parsing markdown each time would be wasted work.
+export default React.memo(MarkdownRenderer); 

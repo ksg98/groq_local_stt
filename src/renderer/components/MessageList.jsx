@@ -292,7 +292,7 @@ function MessageList({ messages = [], onToolCallExecute, onRemoveLastMessage, on
               </div>
             </div>
           ) : message.role === 'assistant' ? (
-            <MarkdownRenderer content={message.content || ''} />
+            <MarkdownRenderer content={message.content || ''} boldWordStarts={!!speech?.prefs?.readingBoldStarts} />
           ) : null}
         </Message>
         );

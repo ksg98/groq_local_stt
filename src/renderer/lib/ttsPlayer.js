@@ -1,5 +1,7 @@
 // Gapless playback queue for streamed PCM (little-endian int16) chunks.
-// Chunks are scheduled back-to-back on a single AudioContext.
+// Chunks are scheduled back-to-back on a single AudioContext. Each chunk is
+// tagged with the id of the sentence it belongs to, so the player can say
+// which sentence is sounding right now and how far into it playback is.
 
 export class TtsPlayer {
   constructor({ sampleRate = 24000, onSpeakingChange, onPausedChange } = {}) {
@@ -10,6 +12,7 @@ export class TtsPlayer {
     this.cursor = 0;
     this.sources = new Set();
     this.paused = false;
+    this.segments = new Map(); // id -> { chunks: [{ start, duration }], complete }
   }
 
   ensureContext() {
@@ -49,8 +52,8 @@ export class TtsPlayer {
     return true;
   }
 
-  // chunk: Uint8Array of int16 LE PCM; sr: its sample rate
-  enqueue(chunk, sr) {
+  // chunk: Uint8Array of int16 LE PCM; sr: its sample rate; id: sentence id
+  enqueue(chunk, sr, id) {
     if (!chunk || chunk.byteLength < 2) return;
     const ctx = this.ensureContext();
 
@@ -75,6 +78,15 @@ export class TtsPlayer {
     source.start(startAt);
     this.cursor = startAt + buffer.duration;
 
+    if (id != null) {
+      let segment = this.segments.get(id);
+      if (!segment) {
+        segment = { chunks: [], complete: false };
+        this.segments.set(id, segment);
+      }
+      segment.chunks.push({ start: startAt, duration: buffer.duration });
+    }
+
     const wasSilent = this.sources.size === 0;
     this.sources.add(source);
     source.onended = () => {
@@ -85,6 +97,56 @@ export class TtsPlayer {
       }
     };
     if (wasSilent) this.onSpeakingChange?.(true);
+  }
+
+  // All audio for this id has arrived; its duration is final.
+  markDone(id) {
+    const segment = this.segments.get(id);
+    if (segment) segment.complete = true;
+  }
+
+  // Which sentence is sounding now: { id, offset, duration, complete }, where
+  // offset counts only audio actually played (scheduling gaps are skipped).
+  position() {
+    if (!this.ctx || this.segments.size === 0) return null;
+    const now = this.ctx.currentTime;
+    let current = null;
+    let latest = null;
+    for (const [id, segment] of this.segments) {
+      const first = segment.chunks[0];
+      if (!first || first.start > now) continue;
+      const last = segment.chunks[segment.chunks.length - 1];
+      const end = last.start + last.duration;
+      if (!latest || first.start > latest.first.start) latest = { id, segment, first };
+      if (now < end) {
+        current = { id, segment };
+        break;
+      }
+    }
+    const pick = current || (latest ? { id: latest.id, segment: latest.segment } : null);
+    if (!pick) return null;
+    let offset = 0;
+    let duration = 0;
+    for (const chunk of pick.segment.chunks) {
+      duration += chunk.duration;
+      if (chunk.start <= now) offset += Math.min(chunk.duration, now - chunk.start);
+    }
+    return { id: pick.id, offset, duration, complete: pick.segment.complete, ended: !current };
+  }
+
+  // Seconds of scheduled audio still to play
+  remaining() {
+    if (!this.ctx) return 0;
+    const now = this.ctx.currentTime;
+    let left = 0;
+    for (const segment of this.segments.values()) {
+      for (const chunk of segment.chunks) {
+        // What is left of this chunk: all of it if it has not started, the
+        // unplayed tail if it is playing, nothing once it has ended
+        left += Math.min(chunk.duration, Math.max(0, chunk.start + chunk.duration - now));
+      }
+    }
+    return left;
   }
 
   stopAll() {
@@ -98,6 +160,7 @@ export class TtsPlayer {
       }
     }
     this.sources.clear();
+    this.segments.clear();
     this.cursor = 0;
     // Leave the context running, or the next thing to speak would be stuck
     // behind a suspension nobody is going to lift.

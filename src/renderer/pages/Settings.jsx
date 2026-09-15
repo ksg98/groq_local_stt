@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Eye, EyeOff, Plus, Trash2, Edit3, Save, X, RefreshCw, Key, Settings as SettingsIcon, Zap, Cpu, Server, AlertCircle, CheckCircle, Mic, Volume2, Globe, Palette } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Plus, Trash2, Edit3, Save, X, RefreshCw, Key, Settings as SettingsIcon, Zap, Cpu, Server, AlertCircle, CheckCircle, Mic, Volume2, Globe, Palette, BookOpen } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -10,6 +10,7 @@ import { Badge } from '../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import Switch from '../components/ui/Switch';
 import { useTheme } from '../hooks/useTheme';
+import { applyReadingClasses, pickReadingPrefs } from '../hooks/useReadingPrefs';
 
 // Make sure the saved model is always selectable, even when the live list
 // hasn't loaded yet or no longer contains it.
@@ -409,6 +410,11 @@ function Settings() {
     setSettings(updatedSettings);
     saveSettings(updatedSettings);
   };
+
+  // Text presentation changes show on this page as they are made
+  useEffect(() => {
+    applyReadingClasses(pickReadingPrefs(settings));
+  }, [settings]);
 
   // Voice (STT/TTS) derived state + sidecar controls
   const sttProvider = settings.sttProvider || 'groq';
@@ -2118,6 +2124,141 @@ function Settings() {
                     Applies to agent replies and to reading a message aloud. The speed button beside a
                     playing message changes it too.
                   </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Reading & focus */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <BookOpen className="h-5 w-5 text-primary" />
+                  <span>Reading &amp; Focus</span>
+                </CardTitle>
+                <CardDescription>
+                  Follow along while a reply is read aloud, and make long replies easier on the eyes
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="tts-auto-read" className="font-medium">Read replies aloud automatically</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Every reply is spoken as it streams in, no voice session needed. Uses the Text to Speech
+                      provider above.
+                    </p>
+                  </div>
+                  <Switch
+                    id="tts-auto-read"
+                    checked={!!settings.ttsAutoRead}
+                    onChange={(e) => handleToggleChange('ttsAutoRead', e.target.checked)}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Follow-along highlight</Label>
+                  <Select
+                    value={settings.readHighlight || 'word'}
+                    onValueChange={(value) => handleSelectChange('readHighlight', value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Word and sentence" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="word">Word and sentence</SelectItem>
+                      <SelectItem value="sentence">Sentence only</SelectItem>
+                      <SelectItem value="off">Off</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Marks what is being spoken while a message is read aloud. Word timing is exact with Kokoro
+                    and estimated with OpenAI voices. Click any sentence to continue from it; ← → skip a sentence.
+                  </p>
+                </div>
+
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="read-dim" className="font-medium">Dim the rest of the message while reading</Label>
+                    <p className="text-xs text-muted-foreground">Only the sentence being spoken keeps full contrast.</p>
+                  </div>
+                  <Switch
+                    id="read-dim"
+                    checked={settings.readDim !== false}
+                    onChange={(e) => handleToggleChange('readDim', e.target.checked)}
+                  />
+                </div>
+
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="read-follow-scroll" className="font-medium">Scroll to follow the voice</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Keeps the spoken sentence in view. Pauses for a few seconds whenever you scroll yourself.
+                    </p>
+                  </div>
+                  <Switch
+                    id="read-follow-scroll"
+                    checked={settings.readFollowScroll !== false}
+                    onChange={(e) => handleToggleChange('readFollowScroll', e.target.checked)}
+                  />
+                </div>
+
+                <div className="border-t border-border pt-4 space-y-5">
+                  <div className="space-y-2">
+                    <Label>Text size</Label>
+                    <Select
+                      value={settings.readingTextSize || 'default'}
+                      onValueChange={(value) => handleSelectChange('readingTextSize', value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Default" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="default">Default</SelectItem>
+                        <SelectItem value="large">Large</SelectItem>
+                        <SelectItem value="xlarge">Extra large</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="space-y-0.5">
+                      <Label htmlFor="reading-comfort" className="font-medium">Comfortable spacing</Label>
+                      <p className="text-xs text-muted-foreground">Taller lines and a narrower column for replies.</p>
+                    </div>
+                    <Switch
+                      id="reading-comfort"
+                      checked={!!settings.readingComfort}
+                      onChange={(e) => handleToggleChange('readingComfort', e.target.checked)}
+                    />
+                  </div>
+
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="space-y-0.5">
+                      <Label htmlFor="reading-font" className="font-medium">Legible font</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Sets replies in Atkinson Hyperlegible, designed so similar letters are hard to confuse.
+                      </p>
+                    </div>
+                    <Switch
+                      id="reading-font"
+                      checked={settings.readingFont === 'hyperlegible'}
+                      onChange={(e) => handleSelectChange('readingFont', e.target.checked ? 'hyperlegible' : 'system')}
+                    />
+                  </div>
+
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="space-y-0.5">
+                      <Label htmlFor="reading-bold-starts" className="font-medium">Bold word starts</Label>
+                      <p className="text-xs text-muted-foreground">
+                        The first part of each word is bold, giving the eye an anchor to move along.
+                      </p>
+                    </div>
+                    <Switch
+                      id="reading-bold-starts"
+                      checked={!!settings.readingBoldStarts}
+                      onChange={(e) => handleToggleChange('readingBoldStarts', e.target.checked)}
+                    />
+                  </div>
                 </div>
               </CardContent>
             </Card>

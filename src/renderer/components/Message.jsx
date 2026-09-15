@@ -1,11 +1,75 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useSyncExternalStore } from 'react';
 import ToolCall from './ToolCall';
 import MarkdownRenderer from './MarkdownRenderer';
 import SpeedControl from './SpeedControl';
 import { TextShimmer } from './ui/text-shimmer';
 import { badgeVariants } from './ui/badge';
 import { cn } from '../lib/utils';
-import { Zap, Undo2, Volume2, Pause, Play, Square } from 'lucide-react';
+import { useFollowAlong } from '../hooks/useFollowAlong';
+import { formatSeconds } from '../lib/speechTiming';
+import { Zap, Undo2, Volume2, Pause, Play, Square, SkipBack, SkipForward } from 'lucide-react';
+
+const noopSubscribe = () => () => {};
+
+// Sticky transport shown on a message while it is being read aloud: skip,
+// pause, stop, where the voice is and how long is left.
+function ReadingBar({ cursor, paused, speech }) {
+  const total = cursor?.total || 0;
+  const current = cursor ? cursor.index + 1 : 0;
+  const atStart = !cursor || cursor.index <= 0;
+  const atEnd = !cursor || cursor.index >= total - 1;
+  return (
+    <div
+      className="sticky top-0 z-20 mb-2 flex flex-wrap items-center gap-1 rounded-lg glass-card px-2 py-1 text-xs text-muted-foreground"
+      data-no-speech=""
+    >
+      <button
+        type="button"
+        onClick={() => speech.skip(-1)}
+        disabled={atStart}
+        className="p-1 rounded hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
+        title="Previous sentence (←)"
+        aria-label="Previous sentence"
+      >
+        <SkipBack className="w-3.5 h-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={() => (paused ? speech.resume() : speech.pause())}
+        className="p-1 rounded hover:bg-accent text-primary transition-colors"
+        title={paused ? 'Resume (space)' : 'Pause (space)'}
+        aria-label={paused ? 'Resume' : 'Pause'}
+      >
+        {paused ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
+      </button>
+      <button
+        type="button"
+        onClick={() => speech.skip(1)}
+        disabled={atEnd}
+        className="p-1 rounded hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
+        title="Next sentence (→)"
+        aria-label="Next sentence"
+      >
+        <SkipForward className="w-3.5 h-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={speech.stop}
+        className="p-1 rounded hover:bg-accent transition-colors"
+        title="Stop"
+        aria-label="Stop reading"
+      >
+        <Square className="w-3.5 h-3.5" />
+      </button>
+      <span className="tabular-nums px-1">
+        {total ? `${current} / ${total}${cursor?.streaming ? '+' : ''}` : 'Starting…'}
+        {total && cursor ? ` · ${formatSeconds(cursor.secondsLeft)} left` : ''}
+      </span>
+      <SpeedControl speed={speech.speed} steps={speech.speedSteps} onChange={speech.setSpeed} placement="down" />
+      <span className="ml-auto hidden md:inline opacity-70">Click a sentence to jump · ← → skip</span>
+    </div>
+  );
+}
 
 function Message({ message, children, onToolCallExecute, allMessages, isLastMessage, messageIndex, onReloadFromMessage, onRewindToMessage, loading, onActionsVisible, hideReasoningUI = false, combinedReasoning = null, combinedReasoningDuration = null, speech = null }) {
   const { role, tool_calls, reasoning, isStreaming, executed_tools, liveReasoning, liveExecutedTools, reasoningSummaries, reasoningDuration, usage } = message;
@@ -16,6 +80,7 @@ function Message({ message, children, onToolCallExecute, allMessages, isLastMess
   const [showActions, setShowActions] = useState(false);
   const wasStreamingRef = useRef(false);
   const actionTimeoutRef = useRef(null);
+  const contentRef = useRef(null);
   
   const isUser = role === 'user';
   const hasReasoning = (reasoning || liveReasoning || combinedReasoning) && !isUser;
@@ -108,7 +173,35 @@ function Message({ message, children, onToolCallExecute, allMessages, isLastMess
   const isPausedHere = speechState === 'paused';
   const speechText = typeof message.content === 'string' ? message.content : '';
   const canSpeak = !!speech?.supported && !isUser && !!speechText.trim();
-  const wrapperClasses = `message-content-wrapper ${isUser ? 'text-foreground' : 'text-foreground'} break-words text-sm overflow-hidden`; // Token text color for both, use break-words, smaller font, contain overflow
+  // Follow-along: where the voice is, if it is inside this message. Read from
+  // a store so only the message being read re-renders as the word moves.
+  const cursorStore = speech?.cursorStore;
+  const cursor = useSyncExternalStore(cursorStore ? cursorStore.subscribe : noopSubscribe, () => {
+    const current = cursorStore?.get();
+    return current && current.token === messageIndex ? current : null;
+  });
+  const readingPrefs = speech?.prefs || {};
+  const highlightMode = readingPrefs.readHighlight || 'word';
+  const follow = useFollowAlong({
+    containerRef: contentRef,
+    cursor: isUser ? null : cursor,
+    text: speechText,
+    mode: highlightMode,
+    followScroll: readingPrefs.readFollowScroll !== false,
+  });
+  const dimWhileReading = !!cursor && highlightMode !== 'off' && readingPrefs.readDim !== false;
+  const wrapperClasses = cn(
+    'message-content-wrapper text-foreground break-words text-sm overflow-hidden',
+    dimWhileReading && 'reading-dim'
+  );
+  // While this message is being read, a click on a sentence continues from it
+  const handleContentClick = (event) => {
+    if (!cursor || !speech?.jumpTo) return;
+    if (window.getSelection()?.toString()) return; // selecting text, not jumping
+    if (event.target.closest('a, button, pre, input, textarea')) return;
+    const index = follow.sentenceAtPoint(event.clientX, event.clientY);
+    if (index >= 0) speech.jumpTo(messageIndex, index);
+  };
 
   const toggleReasoning = () => setShowReasoning(!showReasoning);
   const toggleExecutedTools = () => setShowExecutedTools(!showExecutedTools);
@@ -387,7 +480,8 @@ function Message({ message, children, onToolCallExecute, allMessages, isLastMess
           </div>
         )}
 
-        <div className={wrapperClasses}>
+        {isReadingThis && <ReadingBar cursor={cursor} paused={isPausedHere} speech={speech} />}
+        <div className={wrapperClasses} ref={contentRef} onClick={cursor ? handleContentClick : undefined}>
           {children}
         </div>
         

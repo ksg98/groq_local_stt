@@ -6,6 +6,7 @@ const os = require('os');
 // TTS engine manager behind one renderer-facing IPC surface:
 //   tts-status { state, ... }   tts-audio-chunk { id, sr, chunk }
 //   tts-speak-done { id }       tts-error { id, message }
+//   tts-words { id, offset, words: [[text, start, end], ...] }  (Kokoro only)
 // Engine picked by settings.ttsProvider at tts-start:
 //   'kokoro' — spawns electron/python/kokoro_server.py via uv (local MLX)
 //   'openai' — streams PCM from the OpenAI /v1/audio/speech API
@@ -78,6 +79,14 @@ function handleLine(line) {
       break;
     case 'audio':
       send('tts-audio-chunk', { id: msg.id, sr: msg.sr, chunk: Buffer.from(msg.b64, 'base64') });
+      break;
+    case 'words':
+      // Per-word timestamps for the audio that follows (Kokoro only)
+      send('tts-words', {
+        id: msg.id,
+        offset: Number(msg.offset) || 0,
+        words: Array.isArray(msg.words) ? msg.words : [],
+      });
       break;
     case 'done':
       send('tts-speak-done', { id: msg.id });

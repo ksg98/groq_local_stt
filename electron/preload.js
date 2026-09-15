@@ -236,6 +236,12 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.on('tts-audio-chunk', listener);
       return () => ipcRenderer.removeListener('tts-audio-chunk', listener);
     },
+    // Word timestamps for a sentence's audio (local Kokoro reports them)
+    onWords: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on('tts-words', listener);
+      return () => ipcRenderer.removeListener('tts-words', listener);
+    },
     onSpeakDone: (callback) => {
       const listener = (_event, data) => callback(data);
       ipcRenderer.on('tts-speak-done', listener);
