@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Volume2, Pause, Play, Layers, ChevronDown } from 'lucide-react';
+import { Volume2, Pause, Play, Layers, ChevronDown, FolderSync } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { formatTokens } from '../lib/contextWindow';
 import Message from './Message';
@@ -99,6 +99,23 @@ function SelectionSpeaker({ containerRef, speech }) {
   );
 }
 
+// Where the project's files or instructions changed. Everything below it was
+// answered with the newer version; a trailing one means the next message will be.
+function ProjectUpdateNotice({ trailing }) {
+  return (
+    <div className="my-4 flex items-center gap-3 text-xs text-muted-foreground" data-no-speech="">
+      <div className="h-px flex-1 bg-border" />
+      <span className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-center">
+        <FolderSync className="w-3.5 h-3.5 shrink-0" />
+        {trailing
+          ? 'Project files or instructions changed. Your next message uses the new version.'
+          : 'Project files or instructions updated. Replies below use the new version.'}
+      </span>
+      <div className="h-px flex-1 bg-border" />
+    </div>
+  );
+}
+
 // Where a chat was compacted. Older messages stay visible above; the model
 // sees the summary instead of them.
 function CompactionNotice({ message }) {
@@ -136,7 +153,7 @@ function CompactionNotice({ message }) {
   );
 }
 
-function MessageList({ messages = [], onToolCallExecute, onRemoveLastMessage, onReloadFromMessage, onRewindToMessage, loading, onActionsVisible, speech = null }) {
+function MessageList({ messages = [], onToolCallExecute, onRemoveLastMessage, onReloadFromMessage, onRewindToMessage, loading, onActionsVisible, speech = null, projectVersion = null }) {
   const listRef = React.useRef(null);
   const [fullScreenImage, setFullScreenImage] = useState(null);
 
@@ -259,11 +276,23 @@ function MessageList({ messages = [], onToolCallExecute, onRemoveLastMessage, on
   // A compaction marker is not a message: the reply before it keeps its actions
   const lastMessageIndex = displayMessages.map((m) => !m.compaction).lastIndexOf(true);
 
+  // Messages carry the project version they were sent with, so a change
+  // between two of them — or since the last one — can be pointed out
+  const projectUpdates = new Set();
+  let lastSeenVersion = null;
+  displayMessages.forEach((message, index) => {
+    if (!message.projectVersion) return;
+    if (lastSeenVersion && message.projectVersion !== lastSeenVersion) projectUpdates.add(index);
+    lastSeenVersion = message.projectVersion;
+  });
+  const projectUpdatedSince = !!(projectVersion && lastSeenVersion && projectVersion !== lastSeenVersion);
+
   return (
     <div className="space-y-0.5 pt-4 p-4" ref={listRef}>
       <SelectionSpeaker containerRef={listRef} speech={speech} />
       {displayMessages.map((message, index) => {
         if (message.compaction) return <CompactionNotice key={index} message={message} />;
+        const projectUpdatedHere = projectUpdates.has(index);
         // Find the original index in the messages array (including tool messages)
         const originalIndex = messages.findIndex((m, i) => {
           // Find the nth non-tool message in messages that matches this display message
@@ -289,8 +318,9 @@ function MessageList({ messages = [], onToolCallExecute, onRemoveLastMessage, on
         const combinedReasoningDuration = groupInfo?.combinedDuration || null;
         
         return (
+          <React.Fragment key={index}>
+          {projectUpdatedHere && <ProjectUpdateNotice />}
           <Message 
-            key={index} 
             message={message} 
             messageIndex={originalIndex}
             onToolCallExecute={onToolCallExecute}
@@ -338,8 +368,11 @@ function MessageList({ messages = [], onToolCallExecute, onRemoveLastMessage, on
             <MarkdownRenderer content={message.content || ''} boldWordStarts={!!speech?.prefs?.readingBoldStarts} />
           ) : null}
         </Message>
+          </React.Fragment>
         );
       })}
+
+      {projectUpdatedSince && <ProjectUpdateNotice trailing />}
 
       {/* Fullscreen Image Overlay */}
       {fullScreenImage && (

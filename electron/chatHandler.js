@@ -153,6 +153,8 @@ function cleanMessages(messages) {
         delete cleanMsg.reasoningStartTime;
         delete cleanMsg.usage;
         delete cleanMsg.finish_reason;
+        delete cleanMsg.projectVersion;
+        delete cleanMsg.compaction;
 
         // Ensure user content is array format for vision support
         if (cleanMsg.role === 'user') {

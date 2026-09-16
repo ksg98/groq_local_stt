@@ -213,7 +213,11 @@ async function extractText(name, buffer) {
 async function addFile(projectId, file) {
   const project = loadProject(projectId);
   if (!project) throw new Error('Project not found');
-  if (project.files.length >= MAX_FILES_PER_PROJECT) {
+  // Adding a file that is already in the project replaces it: two copies of
+  // the same document would leave the model reading the outdated one too.
+  const name = path.basename(String(file.name));
+  const superseded = project.files.filter((f) => f.name === name);
+  if (project.files.length - superseded.length >= MAX_FILES_PER_PROJECT) {
     throw new Error(`A project can hold at most ${MAX_FILES_PER_PROJECT} files.`);
   }
   const buffer = Buffer.isBuffer(file.data) ? file.data : Buffer.from(file.data);
@@ -229,13 +233,24 @@ async function addFile(projectId, file) {
 
   const fileId = crypto.randomUUID();
   const filesDir = getProjectFilesDir(projectId);
+  for (const old of superseded) {
+    for (const candidate of [old.storedName, `${old.id}.txt`]) {
+      if (!candidate) continue;
+      const target = path.join(filesDir, path.basename(candidate));
+      if (fs.existsSync(target)) fs.rmSync(target, { force: true });
+    }
+  }
+  if (superseded.length) {
+    project.files = project.files.filter((f) => f.name !== name);
+    console.log(`[Projects] Replaced "${name}" in ${project.name} with the newly added copy`);
+  }
   const storedName = `${fileId}__${safeFileName(file.name)}`;
   fs.writeFileSync(path.join(filesDir, storedName), buffer);
   fs.writeFileSync(path.join(filesDir, `${fileId}.txt`), cleaned);
 
   project.files.push({
     id: fileId,
-    name: path.basename(String(file.name)),
+    name,
     type: file.type || '',
     kind,
     size: buffer.length,

@@ -1380,7 +1380,10 @@ function App() {
     // Format the user message based on content type
     const userMessage = {
       role: 'user',
-      content: content // Assumes ChatInput now sends the correct structured format
+      content: content, // Assumes ChatInput now sends the correct structured format
+      // Which version of the project's files and instructions this message was
+      // sent with, so the transcript can mark where they changed
+      ...(currentProjectId && currentProject?.updatedAt ? { projectVersion: currentProject.updatedAt } : {})
     };
     // Add user message optimistically BEFORE the API call
     const initialMessages = [...baseMessages, userMessage];
@@ -2222,6 +2225,7 @@ function App() {
                     onReloadFromMessage={handleReloadFromMessage}
                     onRewindToMessage={handleRewindToMessage}
                     speech={speech}
+                    projectVersion={currentProject?.updatedAt || null}
                     loading={loading}
                     onActionsVisible={scrollToBottom}
                   />
