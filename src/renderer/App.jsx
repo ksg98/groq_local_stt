@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Link } from 'react-router-dom';
 import MessageList from './components/MessageList';
 import ChatInput from './components/ChatInput';
 import ToolsPanel from './components/ToolsPanel';
@@ -15,9 +14,8 @@ import { buildFrameParts, mergeFinalFrame, pruneHistoryImages } from './lib/fram
 import { useMediaCapture } from './hooks/useMediaCapture';
 // Import shared model definitions - REMOVED
 // import { MODEL_CONTEXT_SIZES } from '../../shared/models';
-import { Settings, Zap, MessageSquare, PanelLeftClose, PanelLeft, Radio, MessagesSquare, FolderOpen, Pencil } from 'lucide-react';
+import { FolderOpen, Pencil } from 'lucide-react';
 import { Button } from './components/ui/button';
-import { Badge } from './components/ui/badge';
 
 // LocalStorage keys
 const TOOL_APPROVAL_PREFIX = 'tool_approval_';
@@ -81,8 +79,6 @@ function App() {
     currentChatId,
     createNewChat, 
     startFreshChat,
-    isSidebarCollapsed,
-    toggleSidebar,
     needsTitleGeneration,
     currentProject,
     currentProjectId
@@ -2031,95 +2027,6 @@ function App() {
       
       {/* Main Content Area */}
       <div className="flex flex-col flex-1 min-w-0">
-        {/* Modern Sticky Header */}
-        <header className="sticky top-0 z-50 glass">
-          <div className="flex h-14 items-center justify-between px-4 max-w-full">
-            <div className="flex items-center space-x-3">
-              {/* Sidebar toggle for mobile/collapsed state */}
-              {isSidebarCollapsed && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={toggleSidebar}
-                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                  title="Expand sidebar"
-                >
-                  <PanelLeft className="h-4 w-4" />
-                </Button>
-              )}
-              
-              <div className="flex items-center space-x-2">
-                <img 
-                  src="./groqLogo.png" 
-                  alt="Groq Logo" 
-                  className="h-7 w-auto"
-                />
-              </div>
-              
-              {/* Status Badge */}
-              {mcpTools.length > 0 && (
-                <Badge variant="secondary" className="bg-secondary hover:bg-accent">
-                  <Zap className="w-3 h-3 mr-1" />
-                  {mcpTools.length} tools
-                </Badge>
-              )}
-              
-              {/* API Mode Indicator */}
-              <span
-                className="text-xs text-muted-foreground flex items-center gap-1 cursor-default"
-                title={useResponsesApi ? "Using Responses API (supports agentic features)" : "Using Chat Completions API"}
-              >
-                {useResponsesApi ? (
-                  <>
-                    <Radio className="w-3 h-3" />
-                    <span className="hidden sm:inline">Responses</span>
-                  </>
-                ) : (
-                  <>
-                    <MessagesSquare className="w-3 h-3" />
-                    <span className="hidden sm:inline">Completions</span>
-                  </>
-                )}
-              </span>
-
-              {/* Active project — opens its instructions & files */}
-              {currentProject && (
-                <button
-                  type="button"
-                  onClick={() => setProjectKnowledgeOpen(true)}
-                  className="flex items-center gap-1.5 max-w-[240px] rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-medium text-foreground hover:bg-primary/15 transition-colors"
-                  title={`Project: ${currentProject.name} — click to view instructions and files`}
-                >
-                  <FolderOpen className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-                  <span className="truncate">{currentProject.name}</span>
-                </button>
-              )}
-            </div>
-
-            <div className="flex items-center space-x-2">
-              {/* New Chat Button - only show when there are messages */}
-              {messages.length > 0 && (
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={handleNewChat}
-                  className="text-foreground hover:text-foreground"
-                >
-                  <MessageSquare className="h-4 w-4 mr-2" />
-                  New Chat
-                </Button>
-              )}
-              
-              {/* Voice model load/unload moved to Settings > Text to Speech */}
-              <Link to="/settings">
-                <Button variant="ghost" size="icon" className="text-foreground hover:text-foreground">
-                  <Settings className="h-5 w-5" />
-                </Button>
-              </Link>
-            </div>
-          </div>
-        </header>
-
       {/* Main Content */}
       {/* TODO: Make the scroll area the entire width instead of the container while keeping the input at the bottom*/}
       <div className="flex-1 flex flex-col overflow-hidden">

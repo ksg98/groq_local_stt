@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { useChat } from '../context/ChatContext';
 import { Button } from './ui/button';
 import {
@@ -15,7 +16,8 @@ import {
   ArrowLeft,
   Pencil,
   BookOpen,
-  FileText
+  FileText,
+  Settings
 } from 'lucide-react';
 
 // LocalStorage key for sidebar width
@@ -615,6 +617,18 @@ function ChatHistorySidebar({
             )}
           </>
         )}
+      </div>
+
+      {/* Footer */}
+      <div className="p-2 border-t border-border">
+        <Link
+          to="/settings"
+          className={`flex items-center gap-2 rounded-md px-2 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors ${isSidebarCollapsed ? 'justify-center' : ''}`}
+          title="Settings"
+        >
+          <Settings className="h-4 w-4 flex-shrink-0" />
+          {!isSidebarCollapsed && <span>Settings</span>}
+        </Link>
       </div>
     </div>
   );
