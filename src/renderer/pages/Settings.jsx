@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Eye, EyeOff, Plus, Trash2, Edit3, Save, X, RefreshCw, Key, Settings as SettingsIcon, Zap, Cpu, Server, AlertCircle, CheckCircle, Mic, Volume2, Globe, Palette, BookOpen, Layers } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Plus, Trash2, Edit3, Save, X, RefreshCw, Key, Settings as SettingsIcon, Zap, Cpu, Server, AlertCircle, CheckCircle, Mic, Volume2, Globe, Palette, BookOpen, Layers, Download } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -23,6 +23,103 @@ function withCurrent(list, current) {
 function formatBytes(n) {
   if (!n) return '';
   return n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`;
+}
+
+const RELEASES_URL = 'https://github.com/ksg98/groq_local_stt/releases/latest';
+
+// Installed version, a manual update check, and the background download's progress
+function UpdatesCard() {
+  const [status, setStatus] = useState(null);
+
+  useEffect(() => {
+    const updates = window.electron?.updates;
+    if (!updates) return undefined;
+    let alive = true;
+    updates.getStatus().then((s) => { if (alive) setStatus(s); }).catch(() => {});
+    const off = updates.onStatus(setStatus);
+    return () => { alive = false; off?.(); };
+  }, []);
+
+  const state = status?.state || 'idle';
+  const busy = state === 'checking' || state === 'available' || state === 'downloading';
+
+  let message = null;
+  if (status && !status.supported) {
+    message = <span className="text-muted-foreground">Updates only work in the installed app.</span>;
+  } else if (state === 'checking') {
+    message = <span className="text-muted-foreground">Checking for updates…</span>;
+  } else if (state === 'none') {
+    message = (
+      <span className="flex items-center gap-1.5 text-green-600 dark:text-green-400">
+        <CheckCircle className="h-4 w-4" />
+        You're up to date.
+      </span>
+    );
+  } else if (state === 'available' || state === 'downloading') {
+    message = (
+      <span className="text-muted-foreground">
+        Downloading version {status.version}…{state === 'downloading' ? ` ${status.percent}%` : ''}
+      </span>
+    );
+  } else if (state === 'downloaded') {
+    message = <span className="text-foreground">Version {status.version} is ready to install.</span>;
+  } else if (state === 'error') {
+    message = (
+      <span className="flex items-start gap-1.5 text-destructive">
+        <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+        <span>
+          Could not check for updates: {status.message}{' '}
+          <a href={RELEASES_URL} target="_blank" rel="noreferrer" className="underline">
+            Download manually
+          </a>
+        </span>
+      </span>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center space-x-2">
+          <Download className="h-5 w-5 text-primary" />
+          <span>Updates</span>
+        </CardTitle>
+        <CardDescription>
+          Groq Desktop checks for new versions when it starts and every 6 hours
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-center justify-between gap-4">
+          <div className="text-sm">
+            <span className="text-muted-foreground">Version </span>
+            <span className="font-medium tabular-nums">{status?.currentVersion || '—'}</span>
+          </div>
+          {state === 'downloaded' ? (
+            <Button type="button" size="sm" onClick={() => window.electron.updates.install()}>
+              Restart to update
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={!status?.supported || busy}
+              onClick={() => window.electron.updates.check()}
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${busy ? 'animate-spin' : ''}`} />
+              Check for updates
+            </Button>
+          )}
+        </div>
+        {message && <div className="text-sm">{message}</div>}
+        {state === 'downloading' && (
+          <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+            <div className="h-full bg-primary transition-all" style={{ width: `${status.percent || 0}%` }} />
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 // RAM status + load/unload row for a local model sidecar (Kokoro / Whisper)
@@ -1423,6 +1520,8 @@ function Settings() {
                 </CardContent>
               </Card>
             )}
+
+            <UpdatesCard />
 
             {/* Appearance */}
             <Card>

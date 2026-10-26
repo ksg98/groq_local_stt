@@ -282,6 +282,18 @@ contextBridge.exposeInMainWorld('electron', {
     },
   },
 
+  // App updates from GitHub Releases: current version, manual check, install
+  updates: {
+    getStatus: () => ipcRenderer.invoke('updates-get-status'),
+    check: () => ipcRenderer.invoke('updates-check'),
+    install: () => ipcRenderer.invoke('updates-install'),
+    onStatus: (callback) => {
+      const listener = (_event, status) => callback(status);
+      ipcRenderer.on('update-status', listener);
+      return () => ipcRenderer.removeListener('update-status', listener);
+    },
+  },
+
   // --- Chat History Functions ---
   chatHistory: {
     list: () => ipcRenderer.invoke('chat-history-list'),

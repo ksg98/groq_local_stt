@@ -42,7 +42,8 @@ const { getProviderModels, getAudioModels, fetchLocalModelInfo } = require('../s
 const chatHandler = require('./chatHandler');
 const toolHandler = require('./toolHandler');
 const webSearchHandler = require('./webSearchHandler');
-const { initAutoUpdater } = require('./autoUpdater');
+const { initAutoUpdater, checkForUpdatesNow, getUpdateStatus, installDownloadedUpdate } = require('./autoUpdater');
+const { setAppMenu } = require('./appMenu');
 
 // Import new manager modules
 const { initializeSettingsHandlers, loadSettings, saveSettings } = require('./settingsManager');
@@ -389,6 +390,11 @@ app.whenReady().then(async () => {
     }
   });
 
+  // App updates, for the Updates section in Settings
+  ipcMain.handle('updates-get-status', () => getUpdateStatus());
+  ipcMain.handle('updates-check', () => checkForUpdatesNow());
+  ipcMain.handle('updates-install', () => installDownloadedUpdate());
+
   // Initialize window manager and get the main window instance
   mainWindow = initializeWindowManager(app, screen, shell, BrowserWindow);
   if (!mainWindow) {
@@ -403,7 +409,8 @@ app.whenReady().then(async () => {
   });
 
   // Start checking GitHub Releases for updates (no-op in dev)
-  initAutoUpdater(mainWindow);
+  initAutoUpdater();
+  setAppMenu({ onCheckForUpdates: () => checkForUpdatesNow({ interactive: true }) });
 
   // Send pending context to renderer if available
   if (pendingContext) {
